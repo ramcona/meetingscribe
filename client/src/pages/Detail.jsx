@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, Clock, Calendar, Users, Mic, Video, Edit2, Check, X, FileText, Sparkles, Copy, RefreshCw, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, Clock, Calendar, Users, Mic, Video, Edit2, Check, X, FileText, Sparkles, Copy, RefreshCw, AlertTriangle, Play, Pause } from 'lucide-react';
 
 // Format seconds into MM:SS
 function formatDuration(sec) {
@@ -36,6 +36,16 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
   const [notesSavedState, setNotesSavedState] = useState('idle'); // 'idle' | 'saving' | 'saved' | 'error'
   const [summaryLanguage, setSummaryLanguage] = useState('id'); // 'id' | 'en' | 'bilingual'
   const saveTimeoutRef = useRef(null);
+
+  // Speakers list states
+  const [editingSpeakerList, setEditingSpeakerList] = useState(null);
+  const [renameListInput, setRenameListInput] = useState('');
+
+  // Custom audio player states
+  const audioRef = useRef(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [audioDuration, setAudioDuration] = useState(0);
 
   useEffect(() => {
     fetchMeetingDetail();
@@ -130,6 +140,70 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
     }
   };
 
+  const handleSaveListRename = async (label) => {
+    if (!renameListInput.trim()) return;
+
+    try {
+      const res = await fetch(`http://localhost:3001/api/meetings/${meetingId}/speaker`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          speaker_label: label,
+          speaker_name: renameListInput.trim()
+        })
+      });
+
+      if (res.ok) {
+        fetchMeetingDetail();
+        setEditingSpeakerList(null);
+      }
+    } catch (err) {
+      console.error('Error renaming speaker from list:', err);
+    }
+  };
+
+  // Custom Audio Player helper methods
+  const onLoadedMetadata = () => {
+    if (audioRef.current) {
+      setAudioDuration(audioRef.current.duration || meeting?.duration_seconds || 0);
+    }
+  };
+
+  const onTimeUpdate = () => {
+    if (audioRef.current) {
+      setCurrentTime(audioRef.current.currentTime);
+    }
+  };
+
+  const togglePlay = () => {
+    if (!audioRef.current) return;
+    if (isPlaying) {
+      audioRef.current.pause();
+      setIsPlaying(false);
+    } else {
+      audioRef.current.play().then(() => {
+        setIsPlaying(true);
+      }).catch(err => console.error('Audio play error:', err));
+    }
+  };
+
+  const handleSeek = (e) => {
+    const newTime = parseFloat(e.target.value);
+    setCurrentTime(newTime);
+    if (audioRef.current) {
+      audioRef.current.currentTime = newTime;
+    }
+  };
+
+  const handleSegmentClick = (startTime) => {
+    if (audioRef.current) {
+      audioRef.current.currentTime = startTime;
+      audioRef.current.play().then(() => {
+        setIsPlaying(true);
+      }).catch(err => console.error('Segment jump audio autoplay error:', err));
+    }
+  };
+
   const handleGenerateSummary = async (type) => {
     setGeneratingSummary(true);
     try {
@@ -192,6 +266,17 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
 
   if (!meeting) return <div className="text-center py-10 font-mono text-gray-500 text-sm">Loading details...</div>;
 
+  const uniqueSpeakers = [];
+  if (meeting?.segments) {
+    meeting.segments.forEach(seg => {
+      const label = seg.speaker_label;
+      const name = seg.speaker_name || label;
+      if (!uniqueSpeakers.some(s => s.label === label)) {
+        uniqueSpeakers.push({ label, name });
+      }
+    });
+  }
+
   const currentSummary = meeting.summaries?.find(s => s.type === summaryType);
 
   return (
@@ -242,148 +327,268 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
           </div>
         </div>
 
-        {/* Audio Player */}
+        {/* Custom Audio Player */}
         {meeting.audio_path && (
-          <div className="border-t border-white/5 pt-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div className="text-xs font-mono text-gray-500 uppercase tracking-wider">Audio Recording</div>
+          <div className="border-t border-white/5 pt-4 flex flex-col gap-3">
             <audio
+              ref={audioRef}
               src={`http://localhost:3001/recordings/${meetingId}.webm`}
-              controls
-              className="w-full md:max-w-xl h-9 bg-black/40 border border-white/5 rounded-lg focus:outline-none"
+              onPlay={() => setIsPlaying(true)}
+              onPause={() => setIsPlaying(false)}
+              onLoadedMetadata={onLoadedMetadata}
+              onTimeUpdate={onTimeUpdate}
             />
+            
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-black/40 border border-white/5 rounded-2xl p-4">
+              {/* Play/Pause & Time */}
+              <div className="flex items-center gap-4">
+                <button
+                  onClick={togglePlay}
+                  className="h-10 w-10 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white flex items-center justify-center transition shadow-lg shadow-indigo-600/10 cursor-pointer shrink-0"
+                >
+                  {isPlaying ? <Pause size={16} fill="white" /> : <Play size={16} fill="white" className="translate-x-0.5" />}
+                </button>
+                
+                <div className="space-y-0.5">
+                  <div className="text-[10px] font-mono text-gray-500 uppercase tracking-wider">Audio Recording</div>
+                  <div className="text-xs font-mono text-white">
+                    {formatDuration(currentTime)} <span className="text-gray-600">/</span> {formatDuration(audioDuration)}
+                  </div>
+                </div>
+              </div>
+
+              {/* Scrubber Bar */}
+              <div className="flex-1 flex items-center gap-3">
+                <input
+                  type="range"
+                  min={0}
+                  max={audioDuration || 100}
+                  value={currentTime}
+                  onChange={handleSeek}
+                  className="w-full accent-indigo-500 h-1 bg-white/10 rounded-lg appearance-none cursor-pointer hover:bg-white/20 transition"
+                  style={{
+                    background: `linear-gradient(to right, #6366f1 0%, #6366f1 ${(currentTime / (audioDuration || 1)) * 100}%, rgba(255,255,255,0.1) ${(currentTime / (audioDuration || 1)) * 100}%, rgba(255,255,255,0.1) 100%)`
+                  }}
+                />
+              </div>
+            </div>
           </div>
         )}
       </div>
 
       {/* Main Tab Controller */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
-        {/* Left Side: Transcript (Takes 2 columns on wide screens) */}
-        <div className="md:col-span-2 bg-[#111113] border border-white/5 rounded-3xl overflow-hidden min-h-[500px] flex flex-col">
-          <div className="border-b border-white/5 p-4 flex items-center justify-between bg-[#151517]">
-            <div className="flex items-center gap-2">
-              <FileText size={16} className="text-gray-400" />
-              <h2 className="text-sm font-semibold text-white">Transcript</h2>
+        {/* Left Side (Takes 2 columns on wide screens) */}
+        <div className="md:col-span-2 space-y-6 flex flex-col animate-fade-in">
+          
+          {/* Speakers Directory Card */}
+          {meeting.segments && meeting.segments.length > 0 && (
+            <div className="bg-[#111113] border border-white/5 rounded-3xl p-6 space-y-4">
+              <div className="flex items-center gap-2 border-b border-white/5 pb-2.5">
+                <Users size={16} className="text-indigo-400" />
+                <h3 className="text-sm font-semibold text-white">Daftar Pembicara (Speakers)</h3>
+              </div>
+              
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs text-left text-gray-300">
+                  <thead>
+                    <tr className="border-b border-white/5 text-[10px] uppercase font-mono tracking-wider text-gray-500">
+                      <th className="py-2 px-1">Label Asli</th>
+                      <th className="py-2 px-2">Nama Tampilan</th>
+                      <th className="py-2 px-2 text-right">Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5">
+                    {uniqueSpeakers.map((spk) => {
+                      const isEditingSpk = editingSpeakerList === spk.label;
+                      return (
+                        <tr key={spk.label} className="hover:bg-white/5 transition">
+                          <td className="py-3 px-1 font-mono text-gray-400">{spk.label}</td>
+                          <td className="py-3 px-2 font-semibold text-white">
+                            {isEditingSpk ? (
+                              <input
+                                type="text"
+                                value={renameListInput}
+                                onChange={(e) => setRenameListInput(e.target.value)}
+                                className="bg-black/40 border border-white/10 rounded px-2.5 py-1 text-xs text-white focus:outline-none focus:border-indigo-500/40 w-full max-w-xs font-sans"
+                                autoFocus
+                                onKeyDown={(e) => e.key === 'Enter' && handleSaveListRename(spk.label)}
+                              />
+                            ) : (
+                              spk.name
+                            )}
+                          </td>
+                          <td className="py-3 px-2 text-right">
+                            {isEditingSpk ? (
+                              <div className="flex items-center justify-end gap-2">
+                                <button
+                                  onClick={() => handleSaveListRename(spk.label)}
+                                  className="text-emerald-400 hover:text-emerald-300 font-medium px-2 py-1 rounded bg-emerald-500/10 border border-emerald-500/20 cursor-pointer text-[10px]"
+                                >
+                                  Simpan
+                                </button>
+                                <button
+                                  onClick={() => setEditingSpeakerList(null)}
+                                  className="text-gray-400 hover:text-white px-2 py-1 cursor-pointer text-[10px]"
+                                >
+                                  Batal
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => {
+                                  setEditingSpeakerList(spk.label);
+                                  setRenameListInput(spk.name);
+                                }}
+                                className="text-indigo-400 hover:text-indigo-300 font-medium cursor-pointer"
+                              >
+                                Ubah Nama
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
-            
-            {meeting.status === 'transcribing' && (
-              <div className="flex items-center gap-1.5 text-xs text-yellow-400 font-mono">
-                <RefreshCw size={12} className="animate-spin" />
-                Transcribing ({meeting.progress || 10}%)
-              </div>
-            )}
-          </div>
+          )}
 
-          {/* Transcript Content */}
-          <div className="flex-1 p-6 space-y-6 max-h-[600px] overflow-y-auto">
-            {meeting.status === 'transcribing' ? (
-              <div className="h-64 flex flex-col items-center justify-center text-center p-6 space-y-4">
-                <div className="relative flex items-center justify-center">
-                  <div className="h-16 w-16 border-4 border-indigo-500/10 border-t-indigo-500 rounded-full animate-spin"></div>
-                  <span className="absolute text-[10px] font-mono font-bold text-indigo-400">{meeting.progress || 10}%</span>
-                </div>
-                <div className="space-y-1">
-                  <h4 className="text-sm font-medium text-white">Transkripsi sedang diproses</h4>
-                  <p className="text-xs text-gray-500 max-w-xs leading-relaxed">
-                    Gemini API sedang menerjemahkan audio dan memilah pembicara ({meeting.progress || 10}%).
-                  </p>
-                </div>
-                <button
-                  disabled={cancelling}
-                  onClick={handleCancelTranscription}
-                  className="bg-red-500/10 hover:bg-red-500/20 text-red-400 text-[11px] font-semibold px-4 py-2 border border-red-500/20 rounded-xl transition cursor-pointer flex items-center gap-1.5"
-                >
-                  {cancelling ? 'Membatalkan...' : 'Batalkan Transkripsi'}
-                </button>
+          {/* Transcript Card */}
+          <div className="bg-[#111113] border border-white/5 rounded-3xl overflow-hidden min-h-[500px] flex flex-col">
+            <div className="border-b border-white/5 p-4 flex items-center justify-between bg-[#151517]">
+              <div className="flex items-center gap-2">
+                <FileText size={16} className="text-gray-400" />
+                <h2 className="text-sm font-semibold text-white">Transcript</h2>
               </div>
-            ) : meeting.status === 'failed' ? (
-              <div className="h-64 flex flex-col items-center justify-center text-center p-6 space-y-4 text-red-400">
-                <div className="p-3 bg-red-500/5 border border-red-500/10 text-red-400 rounded-2xl">
-                  <AlertTriangle size={24} />
+              
+              {meeting.status === 'transcribing' && (
+                <div className="flex items-center gap-1.5 text-xs text-yellow-400 font-mono">
+                  <RefreshCw size={12} className="animate-spin" />
+                  Transcribing ({meeting.progress || 10}%)
                 </div>
-                <div className="space-y-1">
-                  <h4 className="text-sm font-semibold text-white">Gagal memproses transkrip</h4>
-                  <p className="text-xs text-gray-500 max-w-xs leading-relaxed">
-                    Terjadi kesalahan saat memanggil Gemini API. Cek koneksi internet Anda atau pastikan API Key di Settings sudah benar.
-                  </p>
-                </div>
-                <button
-                  disabled={reanalyzing}
-                  onClick={handleReanalyze}
-                  className="bg-[#1D1D21] hover:bg-white/5 border border-white/5 hover:border-white/10 text-white text-xs font-semibold px-4 py-2.5 rounded-xl transition cursor-pointer flex items-center gap-1.5"
-                >
-                  <RefreshCw size={12} className={reanalyzing ? 'animate-spin' : ''} />
-                  {reanalyzing ? 'Memulai Ulang...' : 'Coba Analisis Ulang'}
-                </button>
-              </div>
-            ) : !meeting.segments || meeting.segments.length === 0 ? (
-              <div className="h-64 flex flex-col items-center justify-center text-center p-6 space-y-4">
-                <div className="p-3 bg-white/5 border border-white/5 text-gray-400 rounded-2xl">
-                  <Mic size={24} />
-                </div>
-                <div className="space-y-1">
-                  <h4 className="text-sm font-semibold text-white">Belum ada rekaman suara</h4>
-                  <p className="text-xs text-gray-500 max-w-xs leading-relaxed">
-                    Meeting ini masih berstatus draft. Mulai rekam suara sekarang untuk mendapatkan transkrip otomatis.
-                  </p>
-                </div>
-                {onStartRecording && (
+              )}
+            </div>
+
+            <div className="flex-1 p-6 overflow-y-auto max-h-[600px] space-y-4">
+              {meeting.status === 'transcribing' ? (
+                <div className="h-64 flex flex-col items-center justify-center text-center p-6 space-y-4">
+                  <RefreshCw size={28} className="text-indigo-400 animate-spin" />
+                  <div className="space-y-1">
+                    <h4 className="text-xs font-medium text-white">Transcribing Audio...</h4>
+                    <p className="text-[11px] text-gray-500 leading-relaxed max-w-xs">
+                      Gemini API sedang menerjemahkan audio dan memilah pembicara ({meeting.progress || 10}%).
+                    </p>
+                  </div>
+                  
                   <button
-                    onClick={onStartRecording}
-                    className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold px-4 py-2.5 rounded-xl border border-indigo-500/10 transition shadow-lg shadow-indigo-600/10 cursor-pointer"
+                    onClick={handleCancelTranscription}
+                    disabled={cancelling}
+                    className="bg-red-600/15 hover:bg-red-600/25 border border-red-500/20 hover:border-red-500/30 text-red-400 text-xs font-semibold px-4 py-2 rounded-xl transition cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
                   >
-                    Start Recording
+                    {cancelling ? 'Membatalkan...' : 'Batalkan Transkripsi'}
                   </button>
-                )}
-              </div>
-            ) : (
-              <div className="space-y-6">
-                {meeting.segments.map((seg, idx) => {
-                  const currentSpeakerName = seg.speaker_name || seg.speaker_label;
-                  const isEditing = editingSpeaker === seg.speaker_label;
+                </div>
+              ) : meeting.status === 'failed' ? (
+                <div className="h-64 flex flex-col items-center justify-center text-center p-6 space-y-4">
+                  <AlertTriangle size={28} className="text-red-400" />
+                  <div className="space-y-1.5">
+                    <h4 className="text-xs font-semibold text-white">Transcription Job Failed</h4>
+                    <p className="text-[11px] text-gray-500 leading-relaxed max-w-xs">
+                      Gagal melakukan transkripsi menggunakan model Gemini. Periksa koneksi internet atau validitas API Key Anda di Settings.
+                    </p>
+                  </div>
+                  
+                  <button
+                    onClick={handleReanalyze}
+                    className="bg-[#1D1D21] hover:bg-white/5 border border-white/5 hover:border-white/10 text-white text-xs font-semibold px-4 py-2.5 rounded-xl transition cursor-pointer flex items-center gap-1.5"
+                  >
+                    <RefreshCw size={12} className={reanalyzing ? 'animate-spin' : ''} />
+                    {reanalyzing ? 'Memulai Ulang...' : 'Coba Analisis Ulang'}
+                  </button>
+                </div>
+              ) : !meeting.segments || meeting.segments.length === 0 ? (
+                <div className="h-64 flex flex-col items-center justify-center text-center p-6 space-y-4">
+                  <div className="p-3 bg-white/5 border border-white/5 text-gray-400 rounded-2xl">
+                    <Mic size={24} />
+                  </div>
+                  <div className="space-y-1">
+                    <h4 className="text-sm font-semibold text-white">Belum ada rekaman suara</h4>
+                    <p className="text-xs text-gray-500 max-w-xs leading-relaxed">
+                      Meeting ini masih berstatus draft. Mulai rekam suara sekarang untuk mendapatkan transkrip otomatis.
+                    </p>
+                  </div>
+                  {onStartRecording && (
+                    <button
+                      onClick={onStartRecording}
+                      className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold px-4 py-2.5 rounded-xl border border-indigo-500/10 transition shadow-lg shadow-indigo-600/10 cursor-pointer"
+                    >
+                      Start Recording
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  {meeting.segments.map((seg, idx) => {
+                    const currentSpeakerName = seg.speaker_name || seg.speaker_label;
+                    const isEditing = editingSpeaker === seg.speaker_label;
 
-                  return (
-                    <div key={seg.id || idx} className="group/segment space-y-1 border-l border-white/5 pl-4 hover:border-indigo-500/30 transition">
-                      <div className="flex items-center gap-2 text-xs">
-                        {isEditing ? (
-                          <div className="flex items-center gap-1.5 bg-black/40 border border-white/10 rounded-lg px-2 py-0.5">
-                            <input
-                              type="text"
-                              value={renameInput}
-                              onChange={(e) => setRenameInput(e.target.value)}
-                              className="bg-transparent text-white font-semibold focus:outline-none w-28 text-xs"
-                              autoFocus
-                              onKeyDown={(e) => e.key === 'Enter' && handleSaveRename(seg.speaker_label)}
-                            />
-                            <button onClick={() => handleSaveRename(seg.speaker_label)} className="text-emerald-400 hover:text-emerald-300">
-                              <Check size={11} />
-                            </button>
-                            <button onClick={() => setEditingSpeaker(null)} className="text-red-400 hover:text-red-300">
-                              <X size={11} />
-                            </button>
-                          </div>
-                        ) : (
-                          <div className="flex items-center gap-1.5">
-                            <span 
-                              onClick={() => handleStartRename(seg.speaker_label, seg.speaker_name)}
-                              className="font-bold text-white hover:text-indigo-400 cursor-pointer transition flex items-center gap-1 group/speaker"
+                    return (
+                      <div 
+                        key={seg.id || idx} 
+                        onClick={() => handleSegmentClick(seg.start_time)}
+                        className="group/segment space-y-1 border-l border-white/5 pl-4 hover:border-indigo-500/30 hover:bg-white/5 py-1.5 rounded-r-xl pr-2 transition cursor-pointer"
+                        title="Klik untuk memutar audio dari menit ini"
+                      >
+                        <div className="flex items-center gap-2 text-xs">
+                          {isEditing ? (
+                            <div 
+                              onClick={(e) => e.stopPropagation()}
+                              className="flex items-center gap-1.5 bg-black/40 border border-white/10 rounded-lg px-2 py-0.5"
                             >
-                              {currentSpeakerName}
-                              <Edit2 size={10} className="text-gray-600 opacity-0 group-hover/speaker:opacity-100 transition shrink-0" />
-                            </span>
-                            <span className="text-[10px] text-gray-500 font-mono">
-                              ({formatDuration(seg.start_time)} - {formatDuration(seg.end_time)})
-                            </span>
-                          </div>
-                        )}
+                              <input
+                                type="text"
+                                value={renameInput}
+                                onChange={(e) => setRenameInput(e.target.value)}
+                                className="bg-transparent text-white font-semibold focus:outline-none w-28 text-xs font-sans"
+                                autoFocus
+                                onKeyDown={(e) => e.key === 'Enter' && handleSaveRename(seg.speaker_label)}
+                              />
+                              <button onClick={() => handleSaveRename(seg.speaker_label)} className="text-emerald-400 hover:text-emerald-300">
+                                <Check size={11} />
+                              </button>
+                              <button onClick={() => setEditingSpeaker(null)} className="text-red-400 hover:text-red-300">
+                                <X size={11} />
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-1.5">
+                              <span 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleStartRename(seg.speaker_label, seg.speaker_name);
+                                }}
+                                className="font-bold text-white hover:text-indigo-400 cursor-pointer transition flex items-center gap-1 group/speaker"
+                              >
+                                {currentSpeakerName}
+                                <Edit2 size={10} className="text-gray-600 opacity-0 group-hover/speaker:opacity-100 transition shrink-0" />
+                              </span>
+                              <span className="text-[10px] text-gray-500 font-mono">
+                                ({formatDuration(seg.start_time)} - {formatDuration(seg.end_time)})
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                        <p className="text-xs text-gray-300 leading-relaxed font-sans">
+                          {seg.text}
+                        </p>
                       </div>
-                      <p className="text-xs text-gray-300 leading-relaxed">
-                        {seg.text}
-                      </p>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
