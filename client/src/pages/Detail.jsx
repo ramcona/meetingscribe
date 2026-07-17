@@ -34,6 +34,7 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
   const [cancelling, setCancelling] = useState(false);
   const [notes, setNotes] = useState('');
   const [notesSavedState, setNotesSavedState] = useState('idle'); // 'idle' | 'saving' | 'saved' | 'error'
+  const [summaryLanguage, setSummaryLanguage] = useState('id'); // 'id' | 'en' | 'bilingual'
   const saveTimeoutRef = useRef(null);
 
   useEffect(() => {
@@ -135,7 +136,7 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
       const res = await fetch(`http://localhost:3001/api/meetings/${meetingId}/summary`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type })
+        body: JSON.stringify({ type, language: summaryLanguage })
       });
 
       if (res.ok) {
@@ -503,7 +504,21 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
                   </div>
                 </div>
 
-                <div className="border-t border-white/5 pt-4">
+                <div className="border-t border-white/5 pt-4 space-y-3">
+                  {/* Language Selector Dropdown */}
+                  <div className="w-full space-y-1.5 text-left">
+                    <label className="block text-[9px] font-mono uppercase tracking-wider text-gray-500">Bahasa Output AI</label>
+                    <select
+                      value={summaryLanguage}
+                      onChange={(e) => setSummaryLanguage(e.target.value)}
+                      className="w-full bg-black/40 border border-white/5 focus:border-indigo-500/30 rounded-xl px-3 py-2 text-xs text-white focus:outline-none transition cursor-pointer"
+                    >
+                      <option value="id">Bahasa Indonesia</option>
+                      <option value="en">English (Inggris)</option>
+                      <option value="bilingual">Bilingual (Indonesia & Inggris)</option>
+                    </select>
+                  </div>
+
                   <button
                     onClick={() => handleGenerateSummary(summaryType)}
                     className="w-full bg-white/5 hover:bg-white/10 text-white font-medium text-xs rounded-xl py-2.5 border border-white/5 transition flex items-center justify-center gap-1.5 cursor-pointer"
@@ -518,11 +533,25 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
                 <div className="p-3 bg-indigo-500/5 border border-indigo-500/10 text-indigo-400 rounded-2xl">
                   <Sparkles size={20} />
                 </div>
-                <div className="space-y-1.5">
+                <div className="space-y-1.5 mb-1">
                   <h4 className="text-xs font-semibold text-white">Generate AI Summaries</h4>
                   <p className="text-[11px] text-gray-500 leading-relaxed max-w-[200px]">
                     Dapatkan ringkasan, keputusan utama, dan action items terstruktur secara instan dari transkrip meeting.
                   </p>
+                </div>
+
+                {/* Language Selector Dropdown */}
+                <div className="w-full space-y-1.5 text-left">
+                  <label className="block text-[9px] font-mono uppercase tracking-wider text-gray-500">Bahasa Output AI</label>
+                  <select
+                    value={summaryLanguage}
+                    onChange={(e) => setSummaryLanguage(e.target.value)}
+                    className="w-full bg-black/40 border border-white/5 focus:border-indigo-500/30 rounded-xl px-3 py-2 text-xs text-white focus:outline-none transition cursor-pointer"
+                  >
+                    <option value="id">Bahasa Indonesia</option>
+                    <option value="en">English (Inggris)</option>
+                    <option value="bilingual">Bilingual (Indonesia & Inggris)</option>
+                  </select>
                 </div>
 
                 <button

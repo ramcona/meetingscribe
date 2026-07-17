@@ -184,7 +184,7 @@ router.patch('/meetings/:id/speaker', (req, res) => {
 
 // 9. Generate MoM/Recap
 router.post('/meetings/:id/summary', async (req, res) => {
-  const { type } = req.body; // 'mom' | 'recap'
+  const { type, language } = req.body; // 'mom' | 'recap', language: 'id' | 'en' | 'bilingual'
   if (!type || !['mom', 'recap'].includes(type)) {
     return res.status(400).json({ error: 'Type must be "mom" or "recap"' });
   }
@@ -200,7 +200,7 @@ router.post('/meetings/:id/summary', async (req, res) => {
     }
 
     // Call Gemini API to generate MoM/Recap
-    const content = await generateRecapOrMom(meeting, type);
+    const content = await generateRecapOrMom(meeting, type, language || 'id');
     const summaryId = dbHelpers.addSummary(req.params.id, type, content);
 
     res.json({

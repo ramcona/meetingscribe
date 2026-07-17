@@ -216,16 +216,17 @@ export async function transcribeAudio(meetingId, filePath) {
 }
 
 // Generate recap or MoM using Gemini API
-export async function generateRecapOrMom(meeting, type) {
+export async function generateRecapOrMom(meeting, type, language = 'id') {
   const apiKey = getApiKey();
   const isTest = process.env.NODE_ENV === 'test';
 
   if (isTest || !apiKey) {
-    console.log(`[Gemini] Mocking recap/mom for meeting ${meeting.id}. type=${type}`);
+    console.log(`[Gemini] Mocking recap/mom for meeting ${meeting.id}. type=${type}, language=${language}`);
+    const suffix = language === 'en' ? ' (in English)' : language === 'bilingual' ? ' (Bilingual)' : '';
     if (type === 'mom') {
-      return `# Minutes of Meeting (MoM) - ${meeting.title}\n\n**Client:** ${meeting.client || 'N/A'}\n\n## 1. Ringkasan\nIni adalah draf Minutes of Meeting simulasi.\n\n## 2. Keputusan\n- Keputusan 1 disepakati.\n\n## 3. Action Items\n- Budi: Menyelesaikan database schema.`;
+      return `# Minutes of Meeting (MoM) - ${meeting.title}${suffix}\n\n**Client:** ${meeting.client || 'N/A'}\n\n## 1. Summary\nThis is a mock draft of Minutes of Meeting in language: ${language}.\n\n## 2. Decisions\n- Decision 1 was agreed upon.\n\n## 3. Action Items\n- Budi: Finalize database schema.`;
     } else {
-      return `# Ringkasan (Recap) - ${meeting.title}\n\n- Pembahasan koordinasi project berjalan lancar.\n- Pembagian tugas database SQLite diserahkan ke Budi.`;
+      return `# Ringkasan (Recap) - ${meeting.title}${suffix}\n\n- Project coordination meeting ran smoothly.\n- Database SQLite schema assignment given to Budi.`;
     }
   }
 
@@ -238,6 +239,13 @@ export async function generateRecapOrMom(meeting, type) {
       const name = seg.speaker_name || seg.speaker_label;
       return `[${formatTime(seg.start_time)} - ${formatTime(seg.end_time)}] ${name}: ${seg.text}`;
     }).join('\n');
+
+    let langInstruction = 'Tulis dalam Bahasa Indonesia formal dan profesional dengan format Markdown yang rapi.';
+    if (language === 'en') {
+      langInstruction = 'Write entirely in formal, professional English with clean Markdown formatting.';
+    } else if (language === 'bilingual') {
+      langInstruction = 'Write in a professional bilingual format (incorporating both Bahasa Indonesia and English translations/sections) with clean Markdown formatting.';
+    }
 
     let prompt = '';
     if (type === 'mom') {
@@ -252,11 +260,11 @@ export async function generateRecapOrMom(meeting, type) {
         - Judul: ${meeting.title}
         - Deskripsi: ${meeting.description || 'N/A'}
         - Klien: ${meeting.client || 'N/A'}
-
+ 
         Transkrip:
         ${transcriptText}
-
-        Tulis dalam Bahasa Indonesia formal dan profesional dengan format Markdown yang rapi.
+ 
+        ${langInstruction}
       `;
     } else {
       prompt = `
@@ -266,15 +274,15 @@ export async function generateRecapOrMom(meeting, type) {
         - Judul: ${meeting.title}
         - Deskripsi: ${meeting.description || 'N/A'}
         - Klien: ${meeting.client || 'N/A'}
-
+ 
         Transkrip:
         ${transcriptText}
-
-        Tulis dalam Bahasa Indonesia formal dan profesional dengan format Markdown yang rapi.
+ 
+        ${langInstruction}
       `;
     }
 
-    console.log(`[Gemini] Generating summary of type ${type} for meeting ${meeting.id}...`);
+    console.log(`[Gemini] Generating summary of type ${type} for meeting ${meeting.id} in language ${language}...`);
     const response = await model.generateContent(prompt);
     return response.response.text();
   } catch (error) {
