@@ -21,8 +21,12 @@ dist-desktop/
 # SQLite databases & journals
 *.sqlite
 *.sqlite-journal
+*.db
+*.db-journal
 server/data/*.sqlite
 server/data/*.sqlite-journal
+server/data/*.db
+server/data/*.db-journal
 server/data/db.sqlite
 server/data/db.sqlite-journal
 

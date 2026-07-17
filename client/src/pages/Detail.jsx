@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { ArrowLeft, Clock, Calendar, Users, Mic, Video, Edit2, Check, X, FileText, Sparkles, Copy, RefreshCw, AlertTriangle } from 'lucide-react';
 
 // Format seconds into MM:SS
@@ -32,6 +32,9 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
   const [copySuccess, setCopySuccess] = useState(false);
   const [reanalyzing, setReanalyzing] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [notes, setNotes] = useState('');
+  const [notesSavedState, setNotesSavedState] = useState('idle'); // 'idle' | 'saving' | 'saved' | 'error'
+  const saveTimeoutRef = useRef(null);
 
   useEffect(() => {
     fetchMeetingDetail();
@@ -46,6 +49,9 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
 
     return () => {
       if (pollInterval) clearInterval(pollInterval);
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
     };
   }, [meetingId, meeting?.status]);
 
@@ -55,10 +61,44 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
       if (res.ok) {
         const data = await res.json();
         setMeeting(data);
+        setNotes(data.notes || '');
       }
     } catch (err) {
       console.error('Error fetching meeting detail:', err);
     }
+  };
+
+  const saveNotes = async (updatedNotes) => {
+    try {
+      setNotesSavedState('saving');
+      const res = await fetch(`http://localhost:3001/api/meetings/${meetingId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notes: updatedNotes })
+      });
+      if (res.ok) {
+        setNotesSavedState('saved');
+      } else {
+        setNotesSavedState('error');
+      }
+    } catch (err) {
+      console.error('Error saving notes:', err);
+      setNotesSavedState('error');
+    }
+  };
+
+  const handleNotesChange = (e) => {
+    const val = e.target.value;
+    setNotes(val);
+    setNotesSavedState('saving');
+
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+
+    saveTimeoutRef.current = setTimeout(() => {
+      saveNotes(val);
+    }, 1000);
   };
 
   const handleStartRename = (label, currentName) => {
@@ -366,11 +406,58 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
             >
               Recap
             </button>
+            <button
+              onClick={() => setSummaryType('notes')}
+              className={`flex-1 text-xs font-semibold py-2 rounded-lg transition ${
+                summaryType === 'notes' ? 'bg-[#1D1D21] text-white' : 'text-gray-500 hover:text-white'
+              }`}
+            >
+              Notes
+            </button>
           </div>
 
-          {/* AI Panel Body */}
+          {/* AI / Notes Panel Body */}
           <div className="flex-1 p-5 flex flex-col justify-between">
-            {generatingSummary ? (
+            {summaryType === 'notes' ? (
+              <div className="flex-1 flex flex-col justify-between gap-4 h-full">
+                <div className="flex-1 flex flex-col space-y-2.5 h-full">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-mono text-indigo-400 bg-indigo-500/5 px-2.5 py-0.5 rounded-full flex items-center gap-1 border border-indigo-500/10">
+                      User Notes
+                    </span>
+                    
+                    {/* Auto-save status */}
+                    <div className="flex items-center gap-1.5 text-[10px] font-mono">
+                      {notesSavedState === 'saving' && (
+                        <span className="text-yellow-400 flex items-center gap-1">
+                          <RefreshCw size={10} className="animate-spin" />
+                          Menyimpan...
+                        </span>
+                      )}
+                      {notesSavedState === 'saved' && (
+                        <span className="text-green-400 flex items-center gap-1">
+                          <span className="h-1.5 w-1.5 rounded-full bg-green-400"></span>
+                          Tersimpan otomatis
+                        </span>
+                      )}
+                      {notesSavedState === 'error' && (
+                        <span className="text-red-400">Gagal menyimpan</span>
+                      )}
+                      {notesSavedState === 'idle' && notes && (
+                        <span className="text-gray-500">Tersimpan</span>
+                      )}
+                    </div>
+                  </div>
+                  
+                  <textarea
+                    value={notes}
+                    onChange={handleNotesChange}
+                    placeholder="Tulis poin penting, hasil diskusi, keputusan, atau catatan meeting lainnya secara langsung di sini..."
+                    className="w-full flex-1 bg-black/20 border border-white/5 focus:border-indigo-500/30 rounded-xl p-4 text-xs text-gray-300 placeholder-gray-600 focus:outline-none focus:ring-0 resize-none font-sans leading-relaxed min-h-[350px]"
+                  />
+                </div>
+              </div>
+            ) : generatingSummary ? (
               <div className="flex-1 flex flex-col items-center justify-center text-center p-6 space-y-4">
                 <Sparkles size={28} className="text-indigo-400 animate-pulse" />
                 <div className="space-y-1">

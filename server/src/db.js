@@ -32,6 +32,7 @@ export function initDb() {
       duration_seconds INTEGER,
       recording_started_at TEXT,        -- timestamp perekaman dimulai
       progress INTEGER DEFAULT 0,       -- persentase analisis (0-100)
+      notes TEXT,                       -- catatan meeting yang diinput user
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
@@ -71,6 +72,11 @@ export function initDb() {
   }
   try {
     db.prepare('ALTER TABLE meetings ADD COLUMN progress INTEGER DEFAULT 0').run();
+  } catch (err) {
+    // Column already exists, ignore
+  }
+  try {
+    db.prepare('ALTER TABLE meetings ADD COLUMN notes TEXT').run();
   } catch (err) {
     // Column already exists, ignore
   }
@@ -114,7 +120,7 @@ export const dbHelpers = {
     const fields = [];
     const values = [];
     for (const [key, val] of Object.entries(updates)) {
-      if (['title', 'description', 'client', 'meeting_type', 'status', 'audio_path', 'duration_seconds', 'recording_started_at', 'progress'].includes(key)) {
+      if (['title', 'description', 'client', 'meeting_type', 'status', 'audio_path', 'duration_seconds', 'recording_started_at', 'progress', 'notes'].includes(key)) {
         fields.push(`${key} = ?`);
         values.push(val);
       }
