@@ -1,0 +1,37 @@
+import express from 'express';
+import cors from 'cors';
+import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import apiRouter from './routes.js';
+
+dotenv.config();
+
+const app = express();
+const PORT = process.env.NODE_ENV === 'test' ? 0 : (process.env.PORT || 3001);
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+app.use(cors());
+app.use(express.json());
+app.use('/recordings', express.static(path.join(__dirname, '../data/recordings')));
+
+// Mount API router
+app.use('/api', apiRouter);
+
+// Ping endpoint for basic connectivity testing
+app.get('/api/ping', (req, res) => {
+  res.json({ message: 'pong' });
+});
+
+// Basic error handling middleware
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).json({ error: 'Something went wrong!' });
+});
+
+const server = app.listen(PORT, () => {
+  console.log(`Server running on http://localhost:${PORT}`);
+});
+
+export { app, server };

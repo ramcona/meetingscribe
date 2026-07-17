@@ -1,0 +1,42 @@
+{
+  "name": "meetingscribe-workspace",
+  "version": "1.0.0",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "install:all": "npm install && npm install --prefix client && npm install --prefix server",
+    "dev": "concurrently \"npm run dev --prefix client\" \"npm run dev --prefix server\"",
+    "dev:desktop": "concurrently \"npm run dev --prefix client\" \"npm run dev --prefix server\" \"ELECTRON_DEV=true electron .\"",
+    "electron:start": "electron .",
+    "start": "node server/src/index.js",
+    "test": "NODE_ENV=test node --test server/tests/*.test.js client/src/tests/*.test.js",
+    "build:desktop": "npm run build --prefix client && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "electron": "^43.1.1",
+    "electron-builder": "^26.15.3",
+    "electron-is-dev": "^3.0.1"
+  },
+  "build": {
+    "appId": "com.meetingscribe.app",
+    "productName": "MeetingScribe",
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "directories": {
+      "output": "dist-desktop"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "iconTemplate.png",
+      "server/**/*",
+      "client/dist/**/*"
+    ]
+  }
+}
