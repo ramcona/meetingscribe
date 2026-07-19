@@ -3,7 +3,7 @@ import { Search, Plus, Calendar, Clock, Video, Mic, Trash2, ChevronRight, Users,
 
 // Format seconds into MM:SS
 function formatDuration(sec) {
-  if (!sec) return '00:00';
+  if (!sec || !Number.isFinite(sec) || isNaN(sec) || sec < 0) return '00:00';
   const m = Math.floor(sec / 60).toString().padStart(2, '0');
   const s = Math.floor(sec % 60).toString().padStart(2, '0');
   return `${m}:${s}`;
@@ -139,6 +139,12 @@ export default function Dashboard({ onSelectMeeting, onCreateNew }) {
         return (
           <span className="flex items-center gap-1 text-[11px] font-medium text-red-500 bg-red-950/20 border border-red-900/30 px-2 py-0.5 rounded-full">
             Failed
+          </span>
+        );
+      case 'cancelled':
+        return (
+          <span className="flex items-center gap-1 text-[11px] font-medium text-amber-400 bg-amber-500/5 border border-amber-500/10 px-2 py-0.5 rounded-full">
+            Cancelled
           </span>
         );
       default:

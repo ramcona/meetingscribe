@@ -48,11 +48,17 @@ function startBackend() {
   });
 }
 
+// Set application name for desktop OS integrations
+app.setName('MeetingScribe');
+
 function createWindow() {
+  const iconPath = path.join(__dirname, 'iconTemplate.png');
+
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
-    title: process.env.APP_NAME || 'MeetingScribe',
+    title: 'MeetingScribe',
+    icon: iconPath,
     backgroundColor: '#0A0A0B',
     webPreferences: {
       nodeIntegration: false,
@@ -60,6 +66,15 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js')
     }
   });
+
+  // Set dock icon on macOS if available
+  if (process.platform === 'darwin' && app.dock && fs.existsSync(iconPath)) {
+    try {
+      app.dock.setIcon(iconPath);
+    } catch (err) {
+      console.error('[Electron] Failed to set macOS dock icon:', err);
+    }
+  }
 
   if (isDev) {
     // In development, load Vite local server

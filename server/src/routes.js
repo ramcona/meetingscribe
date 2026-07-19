@@ -283,7 +283,7 @@ router.post('/meetings/:id/reanalyze', async (req, res) => {
   }
 });
 
-// 14. Cancel transcription / reset meeting to draft
+// 14. Cancel transcription / set meeting status to cancelled while preserving audio
 router.post('/meetings/:id/cancel', (req, res) => {
   const meetingId = req.params.id;
   try {
@@ -292,27 +292,13 @@ router.post('/meetings/:id/cancel', (req, res) => {
       return res.status(404).json({ error: 'Meeting not found' });
     }
 
-    // Delete the audio file from disk if it exists
-    if (meeting.audio_path) {
-      try {
-        if (fs.existsSync(meeting.audio_path)) {
-          fs.unlinkSync(meeting.audio_path);
-        }
-      } catch (err) {
-        console.error('Error deleting audio file on cancel:', err);
-      }
-    }
-
-    // Reset meeting to draft state
+    // Reset meeting status to cancelled while preserving audio_path and duration_seconds
     dbHelpers.updateMeeting(meetingId, {
-      status: 'draft',
-      progress: 0,
-      audio_path: null,
-      duration_seconds: 0,
-      recording_started_at: null
+      status: 'cancelled',
+      progress: 0
     });
 
-    res.json({ message: 'Transcription cancelled successfully', status: 'draft' });
+    res.json({ message: 'Transcription cancelled successfully', status: 'cancelled' });
   } catch (error) {
     console.error('Error cancelling transcription:', error);
     res.status(500).json({ error: 'Failed to cancel transcription' });

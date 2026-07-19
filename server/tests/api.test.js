@@ -173,7 +173,7 @@ test('Express API Endpoints integration tests', async (t) => {
     }
   });
 
-  await t.test('POST /api/meetings/:id/cancel - cancel transcription and reset to draft', async () => {
+  await t.test('POST /api/meetings/:id/cancel - cancel transcription and set status to cancelled', async () => {
     // 1. Trigger reanalyze to set status back to transcribing
     await fetch(`${baseUrl}/meetings/${testMeetingId}/reanalyze`, {
       method: 'POST'
@@ -186,15 +186,14 @@ test('Express API Endpoints integration tests', async (t) => {
 
     assert.strictEqual(res.status, 200);
     const data = await res.json();
-    assert.strictEqual(data.status, 'draft');
+    assert.strictEqual(data.status, 'cancelled');
 
-    // 3. Verify database fields were reset
+    // 3. Verify database fields set to cancelled and audio_path preserved
     const checkRes = await fetch(`${baseUrl}/meetings/${testMeetingId}`);
     const checkData = await checkRes.json();
-    assert.strictEqual(checkData.status, 'draft');
+    assert.strictEqual(checkData.status, 'cancelled');
     assert.strictEqual(checkData.progress, 0);
-    assert.strictEqual(checkData.audio_path, null);
-    assert.strictEqual(checkData.recording_started_at, null);
+    assert.ok(checkData.audio_path, 'audio_path should be preserved after cancellation');
   });
 
   await t.test('POST & GET /api/settings - API Key configurations', async () => {

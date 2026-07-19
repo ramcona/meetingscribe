@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, Clock, Calendar, Users, Mic, Video, Edit2, Check, X, FileText, Sparkles, Copy, RefreshCw, AlertTriangle, Play, Pause } from 'lucide-react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { ArrowLeft, Clock, Calendar, Users, Mic, Video, Edit2, Check, X, FileText, Sparkles, Copy, RefreshCw, AlertTriangle, Play, Pause, Volume2 } from 'lucide-react';
 
 // Format seconds into MM:SS
 function formatDuration(sec) {
-  if (!sec) return '00:00';
+  if (!sec || !Number.isFinite(sec) || isNaN(sec) || sec < 0) return '00:00';
   const m = Math.floor(sec / 60).toString().padStart(2, '0');
   const s = Math.floor(sec % 60).toString().padStart(2, '0');
   return `${m}:${s}`;
@@ -43,9 +43,34 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
 
   // Custom audio player states
   const audioRef = useRef(null);
+  const transcriptContainerRef = useRef(null);
+  const segmentRefs = useRef({});
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [audioDuration, setAudioDuration] = useState(0);
+
+  // Active segment calculation based on audio current time
+  const activeSegmentIdx = useMemo(() => {
+    if (!meeting?.segments || meeting.segments.length === 0) return -1;
+    return meeting.segments.findIndex((seg, idx) => {
+      const nextStart = meeting.segments[idx + 1]?.start_time ?? (seg.end_time || seg.start_time + 10);
+      return currentTime >= seg.start_time && currentTime < nextStart;
+    });
+  }, [currentTime, meeting?.segments]);
+
+  // Smoothly center active segment into focus as audio timeline progresses or seeks
+  useEffect(() => {
+    if (activeSegmentIdx !== -1 && segmentRefs.current[activeSegmentIdx] && transcriptContainerRef.current) {
+      const el = segmentRefs.current[activeSegmentIdx];
+      const container = transcriptContainerRef.current;
+      const elTop = el.offsetTop - container.offsetTop;
+      const targetScrollTop = elTop - (container.clientHeight / 2) + (el.clientHeight / 2);
+      container.scrollTo({
+        top: Math.max(0, targetScrollTop),
+        behavior: 'smooth'
+      });
+    }
+  }, [activeSegmentIdx]);
 
   useEffect(() => {
     fetchMeetingDetail();
@@ -163,9 +188,35 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
   };
 
   // Custom Audio Player helper methods
+  const handleDurationUpdate = () => {
+    if (audioRef.current) {
+      const dur = audioRef.current.duration;
+      if (dur && Number.isFinite(dur) && !isNaN(dur)) {
+        setAudioDuration(dur);
+      } else if (meeting?.duration_seconds) {
+        setAudioDuration(meeting.duration_seconds);
+      }
+    }
+  };
+
   const onLoadedMetadata = () => {
     if (audioRef.current) {
-      setAudioDuration(audioRef.current.duration || meeting?.duration_seconds || 0);
+      const dur = audioRef.current.duration;
+      if (dur === Infinity) {
+        // Chromium WebM duration workaround
+        audioRef.current.currentTime = 1e101;
+        audioRef.current.ontimeupdate = function () {
+          this.ontimeupdate = null;
+          this.currentTime = 0;
+          if (Number.isFinite(this.duration)) {
+            setAudioDuration(this.duration);
+          } else if (meeting?.duration_seconds) {
+            setAudioDuration(meeting.duration_seconds);
+          }
+        };
+      } else {
+        handleDurationUpdate();
+      }
     }
   };
 
@@ -328,52 +379,59 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
         </div>
 
         {/* Custom Audio Player */}
-        {meeting.audio_path && (
-          <div className="border-t border-white/5 pt-4 flex flex-col gap-3">
-            <audio
-              ref={audioRef}
-              src={`http://localhost:3001/recordings/${meetingId}.webm`}
-              onPlay={() => setIsPlaying(true)}
-              onPause={() => setIsPlaying(false)}
-              onLoadedMetadata={onLoadedMetadata}
-              onTimeUpdate={onTimeUpdate}
-            />
-            
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-black/40 border border-white/5 rounded-2xl p-4">
-              {/* Play/Pause & Time */}
-              <div className="flex items-center gap-4">
-                <button
-                  onClick={togglePlay}
-                  className="h-10 w-10 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white flex items-center justify-center transition shadow-lg shadow-indigo-600/10 cursor-pointer shrink-0"
-                >
-                  {isPlaying ? <Pause size={16} fill="white" /> : <Play size={16} fill="white" className="translate-x-0.5" />}
-                </button>
-                
-                <div className="space-y-0.5">
-                  <div className="text-[10px] font-mono text-gray-500 uppercase tracking-wider">Audio Recording</div>
-                  <div className="text-xs font-mono text-white">
-                    {formatDuration(currentTime)} <span className="text-gray-600">/</span> {formatDuration(audioDuration)}
+        {meeting.audio_path && (() => {
+          const displayDuration = (audioDuration && Number.isFinite(audioDuration) && audioDuration > 0)
+            ? audioDuration
+            : (meeting.duration_seconds && Number.isFinite(meeting.duration_seconds) ? meeting.duration_seconds : 0);
+
+          return (
+            <div className="border-t border-white/5 pt-4 flex flex-col gap-3">
+              <audio
+                ref={audioRef}
+                src={`http://localhost:3001/recordings/${meetingId}.webm`}
+                onPlay={() => setIsPlaying(true)}
+                onPause={() => setIsPlaying(false)}
+                onLoadedMetadata={onLoadedMetadata}
+                onDurationChange={handleDurationUpdate}
+                onTimeUpdate={onTimeUpdate}
+              />
+              
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-black/40 border border-white/5 rounded-2xl p-4">
+                {/* Play/Pause & Time */}
+                <div className="flex items-center gap-4">
+                  <button
+                    onClick={togglePlay}
+                    className="h-10 w-10 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white flex items-center justify-center transition shadow-lg shadow-indigo-600/10 cursor-pointer shrink-0"
+                  >
+                    {isPlaying ? <Pause size={16} fill="white" /> : <Play size={16} fill="white" className="translate-x-0.5" />}
+                  </button>
+                  
+                  <div className="space-y-0.5">
+                    <div className="text-[10px] font-mono text-gray-500 uppercase tracking-wider">Audio Recording</div>
+                    <div className="text-xs font-mono text-white">
+                      {formatDuration(currentTime)} <span className="text-gray-600">/</span> {formatDuration(displayDuration)}
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              {/* Scrubber Bar */}
-              <div className="flex-1 flex items-center gap-3">
-                <input
-                  type="range"
-                  min={0}
-                  max={audioDuration || 100}
-                  value={currentTime}
-                  onChange={handleSeek}
-                  className="w-full accent-indigo-500 h-1 bg-white/10 rounded-lg appearance-none cursor-pointer hover:bg-white/20 transition"
-                  style={{
-                    background: `linear-gradient(to right, #6366f1 0%, #6366f1 ${(currentTime / (audioDuration || 1)) * 100}%, rgba(255,255,255,0.1) ${(currentTime / (audioDuration || 1)) * 100}%, rgba(255,255,255,0.1) 100%)`
-                  }}
-                />
+                {/* Scrubber Bar */}
+                <div className="flex-1 flex items-center gap-3">
+                  <input
+                    type="range"
+                    min={0}
+                    max={displayDuration || 100}
+                    value={currentTime}
+                    onChange={handleSeek}
+                    className="w-full accent-indigo-500 h-1 bg-white/10 rounded-lg appearance-none cursor-pointer hover:bg-white/20 transition"
+                    style={{
+                      background: `linear-gradient(to right, #6366f1 0%, #6366f1 ${displayDuration > 0 ? Math.min(100, (currentTime / displayDuration) * 100) : 0}%, rgba(255,255,255,0.1) ${displayDuration > 0 ? Math.min(100, (currentTime / displayDuration) * 100) : 0}%, rgba(255,255,255,0.1) 100%)`
+                    }}
+                  />
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
       </div>
 
       {/* Main Tab Controller */}
@@ -471,7 +529,7 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
               )}
             </div>
 
-            <div className="flex-1 p-6 overflow-y-auto max-h-[600px] space-y-4">
+            <div ref={transcriptContainerRef} className="flex-1 p-6 overflow-y-auto max-h-[600px] space-y-4">
               {meeting.status === 'transcribing' ? (
                 <div className="h-64 flex flex-col items-center justify-center text-center p-6 space-y-4">
                   <RefreshCw size={28} className="text-indigo-400 animate-spin" />
@@ -502,43 +560,90 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
                   
                   <button
                     onClick={handleReanalyze}
+                    disabled={reanalyzing}
                     className="bg-[#1D1D21] hover:bg-white/5 border border-white/5 hover:border-white/10 text-white text-xs font-semibold px-4 py-2.5 rounded-xl transition cursor-pointer flex items-center gap-1.5"
                   >
                     <RefreshCw size={12} className={reanalyzing ? 'animate-spin' : ''} />
                     {reanalyzing ? 'Memulai Ulang...' : 'Coba Analisis Ulang'}
                   </button>
                 </div>
-              ) : !meeting.segments || meeting.segments.length === 0 ? (
+              ) : meeting.status === 'cancelled' ? (
                 <div className="h-64 flex flex-col items-center justify-center text-center p-6 space-y-4">
-                  <div className="p-3 bg-white/5 border border-white/5 text-gray-400 rounded-2xl">
-                    <Mic size={24} />
-                  </div>
-                  <div className="space-y-1">
-                    <h4 className="text-sm font-semibold text-white">Belum ada rekaman suara</h4>
-                    <p className="text-xs text-gray-500 max-w-xs leading-relaxed">
-                      Meeting ini masih berstatus draft. Mulai rekam suara sekarang untuk mendapatkan transkrip otomatis.
+                  <AlertTriangle size={28} className="text-amber-400" />
+                  <div className="space-y-1.5">
+                    <h4 className="text-xs font-semibold text-white">Transkripsi Dibatalkan</h4>
+                    <p className="text-[11px] text-gray-500 leading-relaxed max-w-xs">
+                      Proses transkripsi sebelumnya dibatalkan. Rekaman audio Anda tetap tersimpan dan dapat ditranskripsi ulang kapan saja.
                     </p>
                   </div>
-                  {onStartRecording && (
-                    <button
-                      onClick={onStartRecording}
-                      className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold px-4 py-2.5 rounded-xl border border-indigo-500/10 transition shadow-lg shadow-indigo-600/10 cursor-pointer"
-                    >
-                      Start Recording
-                    </button>
-                  )}
+                  
+                  <button
+                    onClick={handleReanalyze}
+                    disabled={reanalyzing}
+                    className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold px-4 py-2.5 rounded-xl border border-indigo-500/10 transition shadow-lg shadow-indigo-600/10 cursor-pointer flex items-center gap-1.5"
+                  >
+                    <RefreshCw size={12} className={reanalyzing ? 'animate-spin' : ''} />
+                    {reanalyzing ? 'Memulai Transkripsi...' : 'Transkrip Ulang'}
+                  </button>
                 </div>
+              ) : (!meeting.segments || meeting.segments.length === 0) ? (
+                meeting.audio_path ? (
+                  <div className="h-64 flex flex-col items-center justify-center text-center p-6 space-y-4">
+                    <FileText size={28} className="text-indigo-400" />
+                    <div className="space-y-1.5">
+                      <h4 className="text-xs font-semibold text-white">Belum Ada Transkrip</h4>
+                      <p className="text-[11px] text-gray-500 leading-relaxed max-w-xs">
+                        File rekaman audio sudah tersimpan. Klik tombol di bawah untuk memulai transkripsi otomatis.
+                      </p>
+                    </div>
+                    
+                    <button
+                      onClick={handleReanalyze}
+                      disabled={reanalyzing}
+                      className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold px-4 py-2.5 rounded-xl border border-indigo-500/10 transition shadow-lg shadow-indigo-600/10 cursor-pointer flex items-center gap-1.5"
+                    >
+                      <RefreshCw size={12} className={reanalyzing ? 'animate-spin' : ''} />
+                      {reanalyzing ? 'Memulai Transkripsi...' : 'Mulai Transkripsi'}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="h-64 flex flex-col items-center justify-center text-center p-6 space-y-4">
+                    <div className="p-3 bg-white/5 border border-white/5 text-gray-400 rounded-2xl">
+                      <Mic size={24} />
+                    </div>
+                    <div className="space-y-1">
+                      <h4 className="text-sm font-semibold text-white">Belum ada rekaman suara</h4>
+                      <p className="text-xs text-gray-500 max-w-xs leading-relaxed">
+                        Meeting ini masih berstatus draft. Mulai rekam suara sekarang untuk mendapatkan transkrip otomatis.
+                      </p>
+                    </div>
+                    {onStartRecording && (
+                      <button
+                        onClick={onStartRecording}
+                        className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold px-4 py-2.5 rounded-xl border border-indigo-500/10 transition shadow-lg shadow-indigo-600/10 cursor-pointer"
+                      >
+                        Start Recording
+                      </button>
+                    )}
+                  </div>
+                )
               ) : (
-                <div className="space-y-6">
+                <div className="space-y-4">
                   {meeting.segments.map((seg, idx) => {
                     const currentSpeakerName = seg.speaker_name || seg.speaker_label;
                     const isEditing = editingSpeaker === seg.speaker_label;
+                    const isActive = idx === activeSegmentIdx;
 
                     return (
                       <div 
                         key={seg.id || idx} 
+                        ref={(el) => (segmentRefs.current[idx] = el)}
                         onClick={() => handleSegmentClick(seg.start_time)}
-                        className="group/segment space-y-1 border-l border-white/5 pl-4 hover:border-indigo-500/30 hover:bg-white/5 py-1.5 rounded-r-xl pr-2 transition cursor-pointer"
+                        className={`group/segment space-y-1.5 pl-4 py-2.5 rounded-r-2xl pr-3 transition-all duration-200 cursor-pointer ${
+                          isActive
+                            ? 'border-l-4 border-indigo-500 bg-indigo-950/40 border-y border-r border-indigo-500/20 shadow-lg shadow-indigo-500/10'
+                            : 'border-l border-white/10 hover:border-indigo-500/40 hover:bg-white/5'
+                        }`}
                         title="Klik untuk memutar audio dari menit ini"
                       >
                         <div className="flex items-center gap-2 text-xs">
@@ -563,24 +668,29 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
                               </button>
                             </div>
                           ) : (
-                            <div className="flex items-center gap-1.5">
+                            <div className="flex items-center gap-2">
+                              {isActive && (
+                                <Volume2 size={13} className="text-indigo-400 animate-pulse shrink-0" />
+                              )}
                               <span 
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   handleStartRename(seg.speaker_label, seg.speaker_name);
                                 }}
-                                className="font-bold text-white hover:text-indigo-400 cursor-pointer transition flex items-center gap-1 group/speaker"
+                                className={`font-bold transition flex items-center gap-1 group/speaker cursor-pointer ${
+                                  isActive ? 'text-indigo-300' : 'text-white hover:text-indigo-400'
+                                }`}
                               >
                                 {currentSpeakerName}
-                                <Edit2 size={10} className="text-gray-600 opacity-0 group-hover/speaker:opacity-100 transition shrink-0" />
+                                <Edit2 size={10} className="text-gray-500 opacity-0 group-hover/speaker:opacity-100 transition shrink-0" />
                               </span>
-                              <span className="text-[10px] text-gray-500 font-mono">
+                              <span className={`text-[10px] font-mono ${isActive ? 'text-indigo-300/80 font-medium' : 'text-gray-500'}`}>
                                 ({formatDuration(seg.start_time)} - {formatDuration(seg.end_time)})
                               </span>
                             </div>
                           )}
                         </div>
-                        <p className="text-xs text-gray-300 leading-relaxed font-sans">
+                        <p className={`text-xs leading-relaxed font-sans ${isActive ? 'text-white font-medium' : 'text-gray-300'}`}>
                           {seg.text}
                         </p>
                       </div>
