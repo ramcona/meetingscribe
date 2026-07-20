@@ -255,8 +255,11 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
     }
   };
 
+  const [summaryError, setSummaryError] = useState('');
+
   const handleGenerateSummary = async (type) => {
     setGeneratingSummary(true);
+    setSummaryError('');
     try {
       const res = await fetch(`http://localhost:3001/api/meetings/${meetingId}/summary`, {
         method: 'POST',
@@ -267,9 +270,13 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
       if (res.ok) {
         fetchMeetingDetail();
         setSummaryType(type);
+      } else {
+        const errData = await res.json();
+        setSummaryError(errData.error || 'Gagal menyusun ringkasan AI.');
       }
     } catch (err) {
       console.error('Error generating summary:', err);
+      setSummaryError('Terjadi kesalahan koneksi saat memproses ringkasan AI.');
     } finally {
       setGeneratingSummary(false);
     }
@@ -868,6 +875,12 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
                     <option value="bilingual">Bilingual (Indonesia & Inggris)</option>
                   </select>
                 </div>
+
+                {summaryError && (
+                  <div className="w-full p-3 bg-red-500/10 border border-red-500/20 text-red-400 rounded-xl text-xs text-center leading-relaxed">
+                    {summaryError}
+                  </div>
+                )}
 
                 <button
                   disabled={!meeting.segments || meeting.segments.length === 0}

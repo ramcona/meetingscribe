@@ -1,15 +1,8 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { GoogleAIFileManager } from '@google/generative-ai/server';
 import { dbHelpers } from './db.js';
+import { getAudioDuration, normalizeAndRescaleSegments, formatTime } from './audioUtils.js';
 import fs from 'fs';
-
-// Helper to format seconds to [MM:SS]
-function formatTime(seconds) {
-  if (seconds === undefined || seconds === null) return '00:00';
-  const m = Math.floor(seconds / 60).toString().padStart(2, '0');
-  const s = Math.floor(seconds % 60).toString().padStart(2, '0');
-  return `${m}:${s}`;
-}
 
 // Get the Gemini API Key
 function getApiKey() {
@@ -19,6 +12,62 @@ function getApiKey() {
 // Get the Gemini model name
 function getModelName() {
   return process.env.GEMINI_MODEL || 'gemini-3.5-flash';
+}
+
+/**
+ * Robust API execution wrapper with exponential backoff retries and fallback model candidates.
+ * Specifically mitigates temporary HTTP 503 "Service Unavailable / High Demand" and HTTP 429 rate limits.
+ */
+async function callGeminiWithRetry(apiCallFn, options = {}) {
+  const maxRetries = options.maxRetries || 3;
+  const initialDelayMs = options.initialDelayMs || 1500;
+  
+  // Preferred candidate model list
+  const primaryModel = getModelName();
+  const fallbackModels = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-2.0-flash'];
+  const modelsToTry = [primaryModel, ...fallbackModels.filter(m => m !== primaryModel)];
+
+  let lastError = null;
+
+  for (let mIdx = 0; mIdx < modelsToTry.length; mIdx++) {
+    const currentModel = modelsToTry[mIdx];
+    console.log(`[Gemini Retry Wrapper] Attempting operation with model: ${currentModel}`);
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        return await apiCallFn(currentModel);
+      } catch (error) {
+        lastError = error;
+        const errMessage = String(error?.message || error);
+
+        // Check if error is transient (503 Service Unavailable, 429 Rate Limit, 500, 502, 504, network fetch error)
+        const isTransient = /503|429|500|502|504|UNAVAILABLE|HIGH_DEMAND|RESOURCE_EXHAUSTED|fetch failed|econnreset|etimedout/i.test(errMessage);
+
+        if (!isTransient) {
+          // Hard error (e.g. invalid API key 400/403), do not retry
+          console.error(`[Gemini Error] Non-retryable error encountered: ${errMessage}`);
+          throw error;
+        }
+
+        console.warn(`[Gemini Retry] Attempt ${attempt}/${maxRetries} on model ${currentModel} failed: ${errMessage}`);
+
+        if (attempt < maxRetries) {
+          // Exponential backoff with jitter: 1.5s, 3s, 6s + random 0-1000ms
+          const backoff = initialDelayMs * Math.pow(2, attempt - 1) + Math.random() * 1000;
+          console.log(`[Gemini Retry] Gemini high demand/503 encountered. Waiting ${Math.round(backoff)}ms before retrying...`);
+          await new Promise(res => setTimeout(res, backoff));
+        }
+      }
+    }
+
+    console.warn(`[Gemini Retry] Model ${currentModel} exhausted all ${maxRetries} retries. Switching to fallback model if available...`);
+  }
+
+  // If all models and retries failed, throw last error with user friendly explanation
+  if (/503|UNAVAILABLE|HIGH_DEMAND/i.test(String(lastError?.message))) {
+    throw new Error('Server Gemini sedang mengalami lonjakan trafik tinggi (503 Service Unavailable). Kami telah mencoba beberapa kali secara otomatis. Silakan coba lagi beberapa saat lagi.');
+  }
+  throw lastError;
 }
 
 // Transcribe audio file using Gemini API
@@ -100,6 +149,21 @@ export async function transcribeAudio(meetingId, filePath) {
   // Real transcription using Gemini
   try {
     if (!(await updateProgress(10))) return;
+
+    // Detect true audio duration on disk first
+    let currentMeetingData = dbHelpers.getMeeting(meetingId);
+    let audioDuration = currentMeetingData?.duration_seconds || 0;
+
+    if (!audioDuration || audioDuration === 0) {
+      console.log(`[Gemini] Calculating exact audio duration for ${filePath}...`);
+      const detectedDuration = await getAudioDuration(filePath);
+      if (detectedDuration > 0) {
+        audioDuration = Math.round(detectedDuration);
+        dbHelpers.updateMeeting(meetingId, { duration_seconds: audioDuration });
+        console.log(`[Gemini] Updated meeting ${meetingId} audio duration to ${audioDuration}s`);
+      }
+    }
+
     const fileManager = new GoogleAIFileManager(apiKey);
     
     console.log(`[Gemini] Uploading ${filePath} to Gemini Files API...`);
@@ -109,9 +173,6 @@ export async function transcribeAudio(meetingId, filePath) {
     });
     console.log(`[Gemini] Uploaded successfully: ${uploadResult.file.uri}`);
     if (!(await updateProgress(30))) return;
-
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: getModelName() });
 
     // Wait for the uploaded file to be processed by Google Files API
     let fileState = 'PROCESSING';
@@ -130,43 +191,54 @@ export async function transcribeAudio(meetingId, filePath) {
     }
     if (!(await updateProgress(60))) return;
 
+    const durationInfoText = audioDuration > 0
+      ? `Durasi total audio ini adalah ${audioDuration} detik (${formatTime(audioDuration)}).\nPENTING: start_time dan end_time HARUS presisi dan berada di dalam rentang 0.0 hingga ${audioDuration}.0 detik. Waktu selesai (end_time) segmen terakhir TIDAK BOLEH melebihi ${audioDuration} detik.`
+      : '';
+
     const prompt = `
       Kamu adalah asisten transkripsi profesional. Dengarkan audio rekaman meeting ini dan buatlah transkrip lengkap.
       Lakukan juga speaker diarization dengan mendeteksi siapa yang sedang berbicara secara konsisten sepanjang audio.
+      ${durationInfoText}
       
       Hasilkan output dalam format JSON array of objects. Setiap object wajib memiliki property berikut:
       - speaker_label: string dengan format "Orang 1", "Orang 2", dst. untuk melabeli pembicara secara konsisten (orang yang sama harus mendapat label yang sama).
-      - start_time: number (waktu mulai berbicara dalam detik, bisa estimasi).
-      - end_time: number (waktu selesai berbicara dalam detik, bisa estimasi).
+      - start_time: number (waktu mulai berbicara dalam detik).
+      - end_time: number (waktu selesai berbicara dalam detik).
       - text: string verbatim dari ucapan pembicara dalam bahasa aslinya (Indonesia/Inggris campur oke).
       
       PENTING: Balas HANYA dengan JSON array yang valid, tanpa penjelasan markdown prefix \`\`\`json atau suffix apa pun.
     `;
 
-    console.log(`[Gemini] Invoking ${getModelName()} for diarization...`);
-    const response = await model.generateContent({
-      contents: [
-        {
-          role: 'user',
-          parts: [
-            {
-              fileData: {
-                mimeType: uploadResult.file.mimeType,
-                fileUri: uploadResult.file.uri
-              }
-            },
-            { text: prompt }
-          ]
+    // Execute content generation with retry and model fallback support
+    const response = await callGeminiWithRetry(async (modelName) => {
+      const genAI = new GoogleGenerativeAI(apiKey);
+      const model = genAI.getGenerativeModel({ model: modelName });
+      console.log(`[Gemini] Invoking model ${modelName} for audio diarization...`);
+      return await model.generateContent({
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              {
+                fileData: {
+                  mimeType: uploadResult.file.mimeType,
+                  fileUri: uploadResult.file.uri
+                }
+              },
+              { text: prompt }
+            ]
+          }
+        ],
+        generationConfig: {
+          responseMimeType: 'application/json'
         }
-      ],
-      generationConfig: {
-        responseMimeType: 'application/json'
-      }
+      });
     });
+
     if (!(await updateProgress(85))) return;
 
     const textResponse = response.response.text();
-    console.log(`[Gemini] Response received:`, textResponse);
+    console.log(`[Gemini] Response received:`, textResponse.slice(0, 200) + '...');
 
     // Clean up file from Gemini Files API storage
     try {
@@ -182,8 +254,8 @@ export async function transcribeAudio(meetingId, filePath) {
       throw new Error('Gemini response is not a JSON array');
     }
 
-    // Save to database
-    const segments = parsed.map((item, index) => ({
+    // Map raw segments
+    const rawSegments = parsed.map((item, index) => ({
       meeting_id: meetingId,
       speaker_label: item.speaker_label || item.speaker || 'Orang 1',
       speaker_name: null,
@@ -192,6 +264,9 @@ export async function transcribeAudio(meetingId, filePath) {
       end_time: parseFloat(item.end_time) || 0,
       segment_order: index + 1
     }));
+
+    // Normalize & rescale timestamps if Gemini hallucinated bloated time values
+    const segments = normalizeAndRescaleSegments(rawSegments, audioDuration);
 
     // Final cancel check
     const finalMeetingCheck = dbHelpers.getMeeting(meetingId);
@@ -231,9 +306,6 @@ export async function generateRecapOrMom(meeting, type, language = 'id') {
   }
 
   try {
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: getModelName() });
-
     // Format transcript segments
     const transcriptText = meeting.segments.map(seg => {
       const name = seg.speaker_name || seg.speaker_label;
@@ -283,8 +355,16 @@ export async function generateRecapOrMom(meeting, type, language = 'id') {
     }
 
     console.log(`[Gemini] Generating summary of type ${type} for meeting ${meeting.id} in language ${language}...`);
-    const response = await model.generateContent(prompt);
-    return response.response.text();
+    
+    // Call with retry and model fallback support
+    return await callGeminiWithRetry(async (modelName) => {
+      const genAI = new GoogleGenerativeAI(apiKey);
+      const model = genAI.getGenerativeModel({ model: modelName });
+      console.log(`[Gemini] Invoking model ${modelName} for summary generation...`);
+      const response = await model.generateContent(prompt);
+      return response.response.text();
+    });
+
   } catch (error) {
     console.error(`[Gemini] Error generating summary for meeting ${meeting.id}:`, error);
     throw new Error(`Gagal memproses dengan Gemini API: ${error.message}`);

@@ -5,6 +5,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { dbHelpers } from './db.js';
 import { transcribeAudio, generateRecapOrMom } from './gemini.js';
+import { getAudioDuration } from './audioUtils.js';
 
 const router = express.Router();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -112,7 +113,7 @@ router.delete('/meetings/:id', (req, res) => {
 // 6. Upload recording & trigger transcription
 router.post('/meetings/:id/recording', upload.single('audio'), async (req, res) => {
   const meetingId = req.params.id;
-  const durationSeconds = req.body.duration_seconds ? parseInt(req.body.duration_seconds, 10) : 0;
+  let durationSeconds = req.body.duration_seconds ? parseInt(req.body.duration_seconds, 10) : 0;
 
   if (!req.file) {
     return res.status(400).json({ error: 'No audio file uploaded' });
@@ -127,6 +128,15 @@ router.post('/meetings/:id/recording', upload.single('audio'), async (req, res) 
     }
 
     const finalPath = req.file.path;
+
+    // Detect exact duration from audio file if durationSeconds was not provided or 0
+    if (!durationSeconds || durationSeconds <= 0) {
+      const detectedDur = await getAudioDuration(finalPath);
+      if (detectedDur > 0) {
+        durationSeconds = Math.round(detectedDur);
+      }
+    }
+
     const recordingStartedAt = req.body.recording_started_at || new Date(Date.now() - durationSeconds * 1000).toISOString();
 
     // Update meeting with audio path, started_at timestamp, progress, and transcribing status

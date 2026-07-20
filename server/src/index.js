@@ -32,6 +32,9 @@ app.use((err, req, res, next) => {
 
 const server = app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
+  if (process.env.NODE_ENV !== 'test') {
+    import('./audioUtils.js').then(m => m.repairDatabaseAudioDurationsAndTimestamps()).catch(err => console.error(err));
+  }
 });
 
 export { app, server };
