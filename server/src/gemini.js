@@ -377,3 +377,91 @@ export async function generateRecapOrMom(meeting, type, language = 'id') {
     throw new Error(`Gagal memproses dengan Gemini API: ${error.message}`);
   }
 }
+
+// Generate topic chapters / agenda markers using Gemini API or local interval partition
+export async function generateChapters(meeting) {
+  const apiKey = getApiKey();
+  const isTest = process.env.NODE_ENV === 'test';
+
+  if (!meeting.segments || meeting.segments.length === 0) {
+    return [];
+  }
+
+  const duration = meeting.duration_seconds || Math.max(...meeting.segments.map(s => s.end_time));
+
+  if (isTest || !apiKey) {
+    console.log(`[Chapters] Generating mock/offline chapters for meeting ${meeting.id}`);
+    const chaps = [
+      { title: 'Pembukaan & Koordinasi Team', summary: 'Diskusi awal dan pembukaan meeting', start_time: 0, end_time: Math.min(duration, 300), chapter_order: 1 },
+      { title: 'Pembahasan Utama & Action Items', summary: 'Diskusi teknis dan pembagian tugas', start_time: Math.min(duration, 305), end_time: duration, chapter_order: 2 }
+    ];
+    dbHelpers.addChapters(meeting.id, chaps);
+    return chaps;
+  }
+
+  try {
+    const transcriptText = meeting.segments.map(seg => {
+      const name = seg.speaker_name || seg.speaker_label;
+      return `[${formatTime(seg.start_time)} - ${formatTime(seg.end_time)}] ${name}: ${seg.text}`;
+    }).join('\n');
+
+    const prompt = `
+      Berdasarkan transkrip meeting berikut, bagi diskusi menjadi 3 hingga 6 Bab (Chapters / Topic Bookmarks) terstruktur berdasarkan topik pembicaraan.
+      
+      Output WAJIB berupa JSON array of objects. Setiap object memiliki:
+      - title: string singkat judul bab/topik (maksimal 6 kata).
+      - summary: string penjelasan 1 kalimat mengenai apa yang dibahas di bab ini.
+      - start_time: number (waktu mulai bab dalam detik).
+      - end_time: number (waktu selesai bab dalam detik).
+      
+      Metadata:
+      - Judul: ${meeting.title}
+      - Durasi Total: ${duration} detik
+      
+      Transkrip:
+      ${transcriptText}
+      
+      PENTING: Balas HANYA dengan JSON array yang valid tanpa markdown.
+    `;
+
+    const response = await callGeminiWithRetry(async (modelName) => {
+      const genAI = new GoogleGenerativeAI(apiKey);
+      const model = genAI.getGenerativeModel({ model: modelName });
+      return await model.generateContent({
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: { responseMimeType: 'application/json' }
+      });
+    });
+
+    const parsed = JSON.parse(response.response.text());
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      const sanitized = parsed.map((item, idx) => ({
+        title: item.title || `Topik ${idx + 1}`,
+        summary: item.summary || '',
+        start_time: Math.min(duration, Math.max(0, parseFloat(item.start_time) || 0)),
+        end_time: Math.min(duration, Math.max(0, parseFloat(item.end_time) || duration)),
+        chapter_order: idx + 1
+      }));
+      dbHelpers.addChapters(meeting.id, sanitized);
+      return sanitized;
+    }
+  } catch (err) {
+    console.error(`[Chapters Error] Failed to generate chapters:`, err);
+  }
+
+  // Fallback to time interval partitioning if parsing failed
+  const chunkCount = Math.min(4, Math.max(2, Math.ceil(duration / 300)));
+  const chunkSize = duration / chunkCount;
+  const fallbackChaps = [];
+  for (let i = 0; i < chunkCount; i++) {
+    fallbackChaps.push({
+      title: `Agenda / Topik ${i + 1}`,
+      summary: `Pembahasan bagian ${i + 1}`,
+      start_time: Math.round(i * chunkSize),
+      end_time: Math.round((i + 1) * chunkSize),
+      chapter_order: i + 1
+    });
+  }
+  dbHelpers.addChapters(meeting.id, fallbackChaps);
+  return fallbackChaps;
+}

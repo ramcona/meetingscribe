@@ -58,6 +58,17 @@ export function initDb() {
       FOREIGN KEY(meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS chapters (
+      id TEXT PRIMARY KEY,
+      meeting_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      summary TEXT,
+      start_time REAL NOT NULL,
+      end_time REAL NOT NULL,
+      chapter_order INTEGER,
+      FOREIGN KEY(meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value TEXT                        -- simpan Gemini API key, dll
@@ -104,11 +115,13 @@ export const dbHelpers = {
 
     const segments = db.prepare('SELECT * FROM transcript_segments WHERE meeting_id = ? ORDER BY segment_order ASC').all(id);
     const summaries = db.prepare('SELECT * FROM summaries WHERE meeting_id = ? ORDER BY created_at DESC').all(id);
+    const chapters = db.prepare('SELECT * FROM chapters WHERE meeting_id = ? ORDER BY chapter_order ASC').all(id);
 
     return {
       ...meeting,
       segments,
-      summaries
+      summaries,
+      chapters
     };
   },
 
@@ -210,6 +223,69 @@ export const dbHelpers = {
   getSetting(key) {
     const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
     return row ? row.value : null;
+  },
+
+  // Full-Text Search helper
+  searchMeetings(query) {
+    if (!query || !query.trim()) return [];
+    const searchTerm = `%${query.trim()}%`;
+
+    const meetings = db.prepare(`
+      SELECT DISTINCT m.*
+      FROM meetings m
+      LEFT JOIN transcript_segments ts ON m.id = ts.meeting_id
+      LEFT JOIN summaries s ON m.id = s.meeting_id
+      WHERE m.title LIKE ? OR m.description LIKE ? OR m.client LIKE ? OR m.notes LIKE ?
+         OR ts.text LIKE ? OR ts.speaker_name LIKE ? OR ts.speaker_label LIKE ?
+         OR s.content LIKE ?
+      ORDER BY m.created_at DESC
+    `).all(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm);
+
+    return meetings.map(meeting => {
+      const snippets = db.prepare(`
+        SELECT id, speaker_label, speaker_name, text, start_time, end_time
+        FROM transcript_segments
+        WHERE meeting_id = ? AND text LIKE ?
+        ORDER BY segment_order ASC
+        LIMIT 3
+      `).all(meeting.id, searchTerm);
+
+      return {
+        ...meeting,
+        matching_snippets: snippets
+      };
+    });
+  },
+
+  // Chapter helpers
+  addChapters(meetingId, chapters) {
+    db.prepare('DELETE FROM chapters WHERE meeting_id = ?').run(meetingId);
+    const insert = db.prepare(`
+      INSERT INTO chapters (id, meeting_id, title, summary, start_time, end_time, chapter_order)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const transaction = db.transaction((chaps) => {
+      for (let idx = 0; idx < chaps.length; idx++) {
+        const c = chaps[idx];
+        const id = crypto.randomUUID();
+        insert.run(
+          id,
+          meetingId,
+          c.title,
+          c.summary || null,
+          parseFloat(c.start_time) || 0,
+          parseFloat(c.end_time) || 0,
+          c.chapter_order || idx + 1
+        );
+      }
+    });
+
+    transaction(chapters);
+  },
+
+  getChapters(meetingId) {
+    return db.prepare('SELECT * FROM chapters WHERE meeting_id = ? ORDER BY chapter_order ASC').all(meetingId);
   }
 };
 

@@ -35,9 +35,24 @@ export default function Dashboard({ onSelectMeeting, onCreateNew }) {
   const [client, setClient] = useState('');
   const [meetingType, setMeetingType] = useState('offline');
 
+  const [searchResults, setSearchResults] = useState(null);
+
   useEffect(() => {
     fetchMeetings();
   }, []);
+
+  useEffect(() => {
+    if (!search.trim()) {
+      setSearchResults(null);
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      fetchSearchResults(search.trim());
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [search]);
 
   const fetchMeetings = async () => {
     try {
@@ -48,6 +63,21 @@ export default function Dashboard({ onSelectMeeting, onCreateNew }) {
       }
     } catch (err) {
       console.error('Error fetching meetings:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchSearchResults = async (query) => {
+    try {
+      setLoading(true);
+      const res = await fetch(`http://localhost:3001/api/search?q=${encodeURIComponent(query)}`);
+      if (res.ok) {
+        const data = await res.json();
+        setSearchResults(data);
+      }
+    } catch (err) {
+      console.error('Error performing search:', err);
     } finally {
       setLoading(false);
     }
@@ -104,13 +134,9 @@ export default function Dashboard({ onSelectMeeting, onCreateNew }) {
     }
   };
 
-  const filteredMeetings = meetings.filter(m => {
-    const matchesSearch = m.title.toLowerCase().includes(search.toLowerCase()) || 
-                          (m.client && m.client.toLowerCase().includes(search.toLowerCase())) ||
-                          (m.description && m.description.toLowerCase().includes(search.toLowerCase()));
-    
-    if (filterType === 'all') return matchesSearch;
-    return matchesSearch && m.meeting_type === filterType;
+  const displayMeetings = (searchResults !== null ? searchResults : meetings).filter(m => {
+    if (filterType === 'all') return true;
+    return m.meeting_type === filterType;
   });
 
   const getStatusBadge = (status) => {
@@ -162,7 +188,7 @@ export default function Dashboard({ onSelectMeeting, onCreateNew }) {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-white">Meeting History</h1>
-          <p className="text-sm text-gray-400">Manage, record, and summarize your meetings</p>
+          <p className="text-sm text-gray-400">Manage, record, search, and summarize your meetings</p>
         </div>
 
         <button
@@ -180,7 +206,7 @@ export default function Dashboard({ onSelectMeeting, onCreateNew }) {
           <Search className="absolute left-3 top-3 text-gray-500" size={16} />
           <input
             type="text"
-            placeholder="Search meetings, clients, or summaries..."
+            placeholder="Pencarian global: cari judul, klien, isi transkrip, catatan, atau ringkasan AI..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="w-full bg-black/40 border border-white/5 focus:border-white/10 rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder-gray-600 focus:outline-none transition"
@@ -218,9 +244,9 @@ export default function Dashboard({ onSelectMeeting, onCreateNew }) {
       {/* Meetings Grid/List */}
       {loading ? (
         <div className="h-64 flex items-center justify-center text-sm text-gray-500 font-mono">
-          Loading history...
+          Searching history...
         </div>
-      ) : filteredMeetings.length === 0 ? (
+      ) : displayMeetings.length === 0 ? (
         <div className="border border-dashed border-white/5 rounded-3xl h-64 flex flex-col items-center justify-center text-center p-6 space-y-3 bg-[#111113]/20">
           <div className="p-3 bg-white/5 border border-white/5 text-gray-400 rounded-2xl">
             <Calendar size={24} />
@@ -228,19 +254,19 @@ export default function Dashboard({ onSelectMeeting, onCreateNew }) {
           <div className="space-y-1">
             <h3 className="text-sm font-semibold text-white">No meetings found</h3>
             <p className="text-xs text-gray-500 max-w-xs">
-              {search ? 'Try adjusting your search queries or filters.' : 'Create your first meeting draft to start recording and transcribing.'}
+              {search ? 'Tidak ada hasil transkrip atau meeting yang cocok dengan kata kunci pencarian Anda.' : 'Buat draft meeting baru untuk mulai merekam dan mentranskripsi.'}
             </p>
           </div>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {filteredMeetings.map((meeting) => (
+          {displayMeetings.map((meeting) => (
             <div
               key={meeting.id}
               onClick={() => onSelectMeeting(meeting.id, meeting.status)}
               className="bg-[#111113] hover:bg-[#151517] border border-white/5 hover:border-white/10 rounded-2xl p-5 flex flex-col justify-between gap-4 transition group cursor-pointer"
             >
-              <div className="space-y-2">
+              <div className="space-y-3">
                 <div className="flex items-start justify-between gap-2">
                   <h3 className="font-semibold text-white group-hover:text-indigo-400 transition leading-snug">
                     {meeting.title}
@@ -252,6 +278,25 @@ export default function Dashboard({ onSelectMeeting, onCreateNew }) {
                   <p className="text-xs text-gray-400 line-clamp-2 leading-relaxed">
                     {meeting.description}
                   </p>
+                )}
+
+                {/* Matching Transcript Snippets Display */}
+                {meeting.matching_snippets && meeting.matching_snippets.length > 0 && (
+                  <div className="bg-black/40 border border-white/5 rounded-xl p-3 space-y-1.5 text-xs">
+                    <div className="text-[10px] font-mono text-indigo-400 uppercase tracking-wider flex items-center gap-1">
+                      <Search size={10} /> Matching Transcript Snippets ({meeting.matching_snippets.length})
+                    </div>
+                    {meeting.matching_snippets.map((snip, sIdx) => (
+                      <div key={sIdx} className="text-gray-300 leading-normal flex items-start gap-1.5 font-sans">
+                        <span className="text-[10px] font-mono text-indigo-300 shrink-0 bg-indigo-500/10 px-1 py-0.5 rounded">
+                          {formatDuration(snip.start_time)}
+                        </span>
+                        <span className="truncate">
+                          <strong className="text-white font-semibold">{snip.speaker_name || snip.speaker_label}:</strong> {snip.text}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
                 )}
               </div>
 

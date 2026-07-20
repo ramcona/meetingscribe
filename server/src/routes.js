@@ -4,7 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { dbHelpers } from './db.js';
-import { transcribeAudio, generateRecapOrMom } from './gemini.js';
+import { transcribeAudio, generateRecapOrMom, generateChapters } from './gemini.js';
 import { getAudioDuration } from './audioUtils.js';
 
 const router = express.Router();
@@ -54,6 +54,18 @@ router.get('/meetings', (req, res) => {
   } catch (error) {
     console.error('Error listing meetings:', error);
     res.status(500).json({ error: 'Failed to retrieve meetings' });
+  }
+});
+
+// 2b. Global Full-Text Search across meetings, transcripts, and summaries
+router.get('/search', (req, res) => {
+  const query = req.query.q || '';
+  try {
+    const results = dbHelpers.searchMeetings(query);
+    res.json(results);
+  } catch (error) {
+    console.error('Error performing search:', error);
+    res.status(500).json({ error: 'Failed to perform search' });
   }
 });
 
@@ -233,6 +245,36 @@ router.get('/meetings/:id/summary', (req, res) => {
   } catch (error) {
     console.error('Error getting summaries:', error);
     res.status(500).json({ error: 'Failed to retrieve summaries' });
+  }
+});
+
+// 10b. Generate AI Topic Chapters
+router.post('/meetings/:id/chapters', async (req, res) => {
+  try {
+    const meeting = dbHelpers.getMeeting(req.params.id);
+    if (!meeting) {
+      return res.status(404).json({ error: 'Meeting not found' });
+    }
+    if (!meeting.segments || meeting.segments.length === 0) {
+      return res.status(400).json({ error: 'Cannot generate chapters without a transcript' });
+    }
+
+    const chapters = await generateChapters(meeting);
+    res.json({ chapters, message: 'Chapters generated successfully' });
+  } catch (error) {
+    console.error('Error generating chapters:', error);
+    res.status(500).json({ error: error.message || 'Failed to generate chapters' });
+  }
+});
+
+// 10c. Get existing chapters
+router.get('/meetings/:id/chapters', (req, res) => {
+  try {
+    const chapters = dbHelpers.getChapters(req.params.id);
+    res.json(chapters);
+  } catch (error) {
+    console.error('Error getting chapters:', error);
+    res.status(500).json({ error: 'Failed to retrieve chapters' });
   }
 });
 

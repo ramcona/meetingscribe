@@ -305,6 +305,24 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
     }
   };
 
+  const [generatingChapters, setGeneratingChapters] = useState(false);
+
+  const handleGenerateChapters = async () => {
+    setGeneratingChapters(true);
+    try {
+      const res = await fetch(`http://localhost:3001/api/meetings/${meetingId}/chapters`, {
+        method: 'POST'
+      });
+      if (res.ok) {
+        fetchMeetingDetail();
+      }
+    } catch (err) {
+      console.error('Error generating chapters:', err);
+    } finally {
+      setGeneratingChapters(false);
+    }
+  };
+
   const handleCancelTranscription = async () => {
     if (!window.confirm('Apakah Anda yakin ingin membatalkan proses transkripsi ini? Semua data suara yang direkam akan dihapus.')) return;
     setCancelling(true);
@@ -421,19 +439,34 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
                   </div>
                 </div>
 
-                {/* Scrubber Bar */}
-                <div className="flex-1 flex items-center gap-3">
-                  <input
-                    type="range"
-                    min={0}
-                    max={displayDuration || 100}
-                    value={currentTime}
-                    onChange={handleSeek}
-                    className="w-full accent-indigo-500 h-1 bg-white/10 rounded-lg appearance-none cursor-pointer hover:bg-white/20 transition"
-                    style={{
-                      background: `linear-gradient(to right, #6366f1 0%, #6366f1 ${displayDuration > 0 ? Math.min(100, (currentTime / displayDuration) * 100) : 0}%, rgba(255,255,255,0.1) ${displayDuration > 0 ? Math.min(100, (currentTime / displayDuration) * 100) : 0}%, rgba(255,255,255,0.1) 100%)`
-                    }}
-                  />
+                {/* Scrubber Bar with Chapter Bookmarks */}
+                <div className="flex-1 flex flex-col gap-1">
+                  <div className="relative flex items-center">
+                    <input
+                      type="range"
+                      min={0}
+                      max={displayDuration || 100}
+                      value={currentTime}
+                      onChange={handleSeek}
+                      className="w-full accent-indigo-500 h-1 bg-white/10 rounded-lg appearance-none cursor-pointer hover:bg-white/20 transition relative z-10"
+                      style={{
+                        background: `linear-gradient(to right, #6366f1 0%, #6366f1 ${displayDuration > 0 ? Math.min(100, (currentTime / displayDuration) * 100) : 0}%, rgba(255,255,255,0.1) ${displayDuration > 0 ? Math.min(100, (currentTime / displayDuration) * 100) : 0}%, rgba(255,255,255,0.1) 100%)`
+                      }}
+                    />
+                    {/* Chapter Visual Markers on Scrubber */}
+                    {displayDuration > 0 && meeting.chapters && meeting.chapters.map((chap, cIdx) => {
+                      const posPct = Math.min(99, Math.max(0, (chap.start_time / displayDuration) * 100));
+                      return (
+                        <div
+                          key={cIdx}
+                          onClick={() => handleSegmentClick(chap.start_time)}
+                          className="absolute h-3 w-1 bg-amber-400 rounded-full hover:scale-150 transition cursor-pointer z-20"
+                          style={{ left: `${posPct}%` }}
+                          title={`[Chapter ${cIdx + 1}] ${chap.title} (${formatDuration(chap.start_time)})`}
+                        />
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
             </div>
@@ -446,6 +479,59 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
         {/* Left Side (Takes 2 columns on wide screens) */}
         <div className="md:col-span-2 space-y-6 flex flex-col animate-fade-in">
           
+          {/* Topic Chapters / Bookmarks Card */}
+          {meeting.segments && meeting.segments.length > 0 && (
+            <div className="bg-[#111113] border border-white/5 rounded-3xl p-6 space-y-4">
+              <div className="flex items-center justify-between border-b border-white/5 pb-2.5">
+                <div className="flex items-center gap-2">
+                  <Sparkles size={16} className="text-amber-400" />
+                  <h3 className="text-sm font-semibold text-white">Bab Topik & Visual Bookmarks</h3>
+                </div>
+
+                <button
+                  onClick={handleGenerateChapters}
+                  disabled={generatingChapters}
+                  className="text-[10px] font-semibold text-amber-400 hover:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 px-3 py-1.5 rounded-xl transition cursor-pointer flex items-center gap-1 disabled:opacity-50"
+                >
+                  <RefreshCw size={10} className={generatingChapters ? 'animate-spin' : ''} />
+                  {generatingChapters ? 'Menyusun Bab...' : meeting.chapters && meeting.chapters.length > 0 ? 'Regenerate Bab' : 'Buat Bab Topik'}
+                </button>
+              </div>
+
+              {meeting.chapters && meeting.chapters.length > 0 ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {meeting.chapters.map((chap, cIdx) => (
+                    <div
+                      key={chap.id || cIdx}
+                      onClick={() => handleSegmentClick(chap.start_time)}
+                      className="bg-black/40 hover:bg-amber-950/20 border border-white/5 hover:border-amber-500/30 rounded-2xl p-3.5 space-y-1.5 transition cursor-pointer group"
+                      title="Klik untuk memutar audio bab ini"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[10px] font-mono text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full font-semibold">
+                          Bab {cIdx + 1} • {formatDuration(chap.start_time)}
+                        </span>
+                        <Play size={12} className="text-amber-400 opacity-0 group-hover:opacity-100 transition" />
+                      </div>
+                      <h4 className="text-xs font-bold text-white group-hover:text-amber-300 transition leading-snug">
+                        {chap.title}
+                      </h4>
+                      {chap.summary && (
+                        <p className="text-[11px] text-gray-400 leading-normal line-clamp-2">
+                          {chap.summary}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-4 text-xs text-gray-500 font-sans">
+                  Klik "Buat Bab Topik" di atas untuk membagikan transkrip meeting ini menjadi segmen bab & visual bookmark pada audio scrubber.
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Speakers Directory Card */}
           {meeting.segments && meeting.segments.length > 0 && (
             <div className="bg-[#111113] border border-white/5 rounded-3xl p-6 space-y-4">
