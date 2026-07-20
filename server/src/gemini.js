@@ -12,20 +12,20 @@ function getApiKey() {
 
 // Get the Gemini model name
 function getModelName() {
-  return process.env.GEMINI_MODEL || 'gemini-3.5-flash';
+  return process.env.GEMINI_MODEL || 'gemini-2.0-flash';
 }
 
 /**
  * Robust API execution wrapper with exponential backoff retries and fallback model candidates.
- * Specifically mitigates temporary HTTP 503 "Service Unavailable / High Demand" and HTTP 429 rate limits.
+ * Specifically mitigates temporary HTTP 503 "Service Unavailable / High Demand", HTTP 429 rate limits, and 404 model availability errors.
  */
 async function callGeminiWithRetry(apiCallFn, options = {}) {
   const maxRetries = options.maxRetries || 3;
   const initialDelayMs = options.initialDelayMs || 1500;
   
-  // Preferred candidate model list
+  // Preferred candidate model list using valid Google Gemini API models
   const primaryModel = getModelName();
-  const fallbackModels = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-2.0-flash'];
+  const fallbackModels = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'];
   const modelsToTry = [primaryModel, ...fallbackModels.filter(m => m !== primaryModel)];
 
   let lastError = null;
@@ -41,12 +41,19 @@ async function callGeminiWithRetry(apiCallFn, options = {}) {
         lastError = error;
         const errMessage = String(error?.message || error);
 
+        // Check if model is not available (404 Not Found / deprecated)
+        const isModelNotFound = /404|not found|no longer available|not supported/i.test(errMessage);
+        if (isModelNotFound) {
+          console.warn(`[Gemini Retry] Model ${currentModel} is not available (404). Skipping to next candidate model...`);
+          break; // Try next candidate model immediately
+        }
+
         // Check if error is transient (503 Service Unavailable, 429 Rate Limit, 500, 502, 504, network fetch error)
         const isTransient = /503|429|500|502|504|UNAVAILABLE|HIGH_DEMAND|RESOURCE_EXHAUSTED|fetch failed|econnreset|etimedout/i.test(errMessage);
 
         if (!isTransient) {
           // Hard error (e.g. invalid API key 400/403), do not retry
-          console.error(`[Gemini Error] Non-retryable error encountered: ${errMessage}`);
+          console.error(`[Gemini Error] Non-retryable error encountered on ${currentModel}: ${errMessage}`);
           throw error;
         }
 
@@ -55,13 +62,13 @@ async function callGeminiWithRetry(apiCallFn, options = {}) {
         if (attempt < maxRetries) {
           // Exponential backoff with jitter: 1.5s, 3s, 6s + random 0-1000ms
           const backoff = initialDelayMs * Math.pow(2, attempt - 1) + Math.random() * 1000;
-          console.log(`[Gemini Retry] Gemini high demand/503 encountered. Waiting ${Math.round(backoff)}ms before retrying...`);
+          console.log(`[Gemini Retry] High demand/503 encountered. Waiting ${Math.round(backoff)}ms before retrying...`);
           await new Promise(res => setTimeout(res, backoff));
         }
       }
     }
 
-    console.warn(`[Gemini Retry] Model ${currentModel} exhausted all ${maxRetries} retries. Switching to fallback model if available...`);
+    console.warn(`[Gemini Retry] Model ${currentModel} failed. Switching to fallback model if available...`);
   }
 
   // If all models and retries failed, throw last error with user friendly explanation
