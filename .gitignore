@@ -30,9 +30,11 @@ server/data/*.db-journal
 server/data/db.sqlite
 server/data/db.sqlite-journal
 
-# Record-ah audio files
+# Record-ah audio files & downloaded model caches
 server/data/recordings/*
 !server/data/recordings/.gitkeep
+server/data/models/
+server/data/models/*
 
 # System & OS Files
 .DS_Store

@@ -33,6 +33,31 @@ export function convertAudioToWav(inputPath, outputPath) {
   });
 }
 
+// Read 16kHz PCM WAV file and convert to Float32Array required by Transformers.js in Node.js
+export function readWavAudioToFloat32Array(wavPath) {
+  const buffer = fs.readFileSync(wavPath);
+  let dataOffset = 44;
+  for (let i = 0; i < buffer.length - 4; i++) {
+    if (buffer.toString('ascii', i, i + 4) === 'data') {
+      dataOffset = i + 8;
+      break;
+    }
+  }
+
+  const pcmData = new Int16Array(
+    buffer.buffer,
+    buffer.byteOffset + dataOffset,
+    Math.floor((buffer.length - dataOffset) / 2)
+  );
+
+  const float32Array = new Float32Array(pcmData.length);
+  for (let i = 0; i < pcmData.length; i++) {
+    float32Array[i] = pcmData[i] / 32768.0;
+  }
+
+  return float32Array;
+}
+
 // Lazy-load Whisper Pipeline
 async function getWhisperPipeline(modelName = 'Xenova/whisper-tiny') {
   if (!whisperPipelineInstance) {
@@ -90,14 +115,18 @@ export async function transcribeLocalAudio(meetingId, filePath) {
     await convertAudioToWav(filePath, tempWavPath);
     if (!(await updateProgress(35))) return;
 
-    // 3. Run Whisper local pipeline
+    // 3. Decode WAV file to Float32Array for Node.js environment
+    console.log(`[LocalWhisper] Reading PCM audio samples into Float32Array...`);
+    const audioData = readWavAudioToFloat32Array(tempWavPath);
+
+    // 4. Run Whisper local pipeline
     console.log(`[LocalWhisper] Running local Whisper speech recognition...`);
     const transcriber = await getWhisperPipeline('Xenova/whisper-tiny');
     
     if (!(await updateProgress(55))) return;
 
     // Execute Whisper with timestamp generation
-    const output = await transcriber(tempWavPath, {
+    const output = await transcriber(audioData, {
       chunk_length_s: 30,
       stride_length_s: 5,
       return_timestamps: true
