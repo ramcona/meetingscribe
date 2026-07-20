@@ -240,8 +240,10 @@ router.get('/meetings/:id/summary', (req, res) => {
 router.get('/settings', (req, res) => {
   try {
     const apiKey = dbHelpers.getSetting('gemini_api_key');
+    const engine = dbHelpers.getSetting('transcription_engine') || 'auto';
     res.json({
       gemini_api_key_set: !!apiKey,
+      transcription_engine: engine,
       app_name: process.env.APP_NAME || 'MeetingScribe'
     });
   } catch (error) {
@@ -252,12 +254,14 @@ router.get('/settings', (req, res) => {
 
 // 12. Save settings
 router.post('/settings', (req, res) => {
-  const { gemini_api_key } = req.body;
-  if (gemini_api_key === undefined) {
-    return res.status(400).json({ error: 'gemini_api_key is required' });
-  }
+  const { gemini_api_key, transcription_engine } = req.body;
   try {
-    dbHelpers.setSetting('gemini_api_key', gemini_api_key);
+    if (gemini_api_key !== undefined) {
+      dbHelpers.setSetting('gemini_api_key', gemini_api_key);
+    }
+    if (transcription_engine !== undefined) {
+      dbHelpers.setSetting('transcription_engine', transcription_engine);
+    }
     res.json({ message: 'Settings saved successfully' });
   } catch (error) {
     console.error('Error saving settings:', error);

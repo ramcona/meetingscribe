@@ -8,6 +8,8 @@ export default function Settings() {
   const [message, setMessage] = useState({ text: '', type: '' });
   const [permissionStatus, setPermissionStatus] = useState('prompt'); // 'granted' | 'denied' | 'prompt'
 
+  const [transcriptionEngine, setTranscriptionEngine] = useState('auto'); // 'auto' | 'gemini' | 'local_whisper'
+
   useEffect(() => {
     fetchSettings();
     checkPermission();
@@ -19,6 +21,9 @@ export default function Settings() {
       if (res.ok) {
         const data = await res.json();
         setIsKeySet(data.gemini_api_key_set);
+        if (data.transcription_engine) {
+          setTranscriptionEngine(data.transcription_engine);
+        }
       }
     } catch (err) {
       console.error('Error fetching settings:', err);
@@ -57,21 +62,26 @@ export default function Settings() {
     setMessage({ text: '', type: '' });
 
     try {
+      const payload = { transcription_engine: transcriptionEngine };
+      if (apiKey.trim()) {
+        payload.gemini_api_key = apiKey.trim();
+      }
+
       const res = await fetch('http://localhost:3001/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ gemini_api_key: apiKey })
+        body: JSON.stringify(payload)
       });
 
       if (res.ok) {
-        setMessage({ text: 'Gemini API Key saved successfully!', type: 'success' });
-        setIsKeySet(true);
+        setMessage({ text: 'Pengaturan berhasil disimpan!', type: 'success' });
+        if (apiKey.trim()) setIsKeySet(true);
         setApiKey('');
       } else {
-        setMessage({ text: 'Failed to save settings.', type: 'error' });
+        setMessage({ text: 'Gagal menyimpan pengaturan.', type: 'error' });
       }
     } catch (err) {
-      setMessage({ text: 'Failed to connect to backend server.', type: 'error' });
+      setMessage({ text: 'Gagal terhubung ke backend server.', type: 'error' });
     } finally {
       setLoading(false);
     }
@@ -85,20 +95,40 @@ export default function Settings() {
         </div>
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-white">Settings</h1>
-          <p className="text-sm text-gray-400">Configure your Gemini API key and audio environment</p>
+          <p className="text-sm text-gray-400">Configure your transcription engine, API key, and audio environment</p>
         </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* API Settings Box */}
+        {/* API & Engine Settings Box */}
         <div className="md:col-span-2 space-y-6">
           <div className="bg-[#111113] border border-white/5 rounded-2xl p-6 space-y-6">
             <div className="flex items-center gap-2 text-white font-medium border-b border-white/5 pb-4">
               <Key size={18} className="text-indigo-400" />
-              <h2>Google Gemini API Configuration</h2>
+              <h2>Transcription Engine & API Configuration</h2>
             </div>
 
-            <form onSubmit={handleSave} className="space-y-4">
+            <form onSubmit={handleSave} className="space-y-6">
+              {/* Engine Preference Choice */}
+              <div className="space-y-2">
+                <label className="block text-xs font-mono text-gray-400 uppercase tracking-wider">
+                  Engine Transkripsi Utama
+                </label>
+                <select
+                  value={transcriptionEngine}
+                  onChange={(e) => setTranscriptionEngine(e.target.value)}
+                  className="w-full bg-black/40 border border-white/10 focus:border-indigo-500/50 rounded-xl px-4 py-3 text-xs text-white focus:outline-none transition cursor-pointer"
+                >
+                  <option value="auto">Auto (Gemini AI Cloud + Fallback Local Whisper Offline)</option>
+                  <option value="gemini">Google Gemini 3.5 Flash (Cloud - Diarization & Fast)</option>
+                  <option value="local_whisper">Local Offline Whisper (100% Private, Zero Cloud & Zero Mismatch)</option>
+                </select>
+                <p className="text-[11px] text-gray-500 leading-relaxed">
+                  Mode <strong>Local Offline Whisper</strong> berjalan sepenuhnya di komputer lokal Anda tanpa membutuhkan koneksi internet atau kuota API.
+                </p>
+              </div>
+
+              {/* Gemini API Key */}
               <div>
                 <label className="block text-xs font-mono text-gray-400 uppercase tracking-wider mb-2">
                   Gemini API Key
@@ -108,7 +138,7 @@ export default function Settings() {
                     type="password"
                     value={apiKey}
                     onChange={(e) => setApiKey(e.target.value)}
-                    placeholder={isKeySet ? "••••••••••••••••••••••••••••••••" : "Enter Gemini API Key"}
+                    placeholder={isKeySet ? "••••••••••••••••••••••••••••••••" : "Masukkan Gemini API Key (Opsional untuk Local Mode)"}
                     className="w-full bg-black/40 border border-white/10 focus:border-indigo-500/50 rounded-xl px-4 py-3 text-sm text-white placeholder-gray-600 focus:outline-none transition"
                   />
                   <div className="absolute right-3 top-3.5">
@@ -139,10 +169,10 @@ export default function Settings() {
 
               <button
                 type="submit"
-                disabled={loading || !apiKey}
+                disabled={loading}
                 className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-medium rounded-xl py-3 text-sm transition shadow-lg shadow-indigo-600/10 cursor-pointer"
               >
-                {loading ? 'Saving...' : 'Save API Key'}
+                {loading ? 'Menyimpan...' : 'Simpan Pengaturan Engine'}
               </button>
             </form>
           </div>

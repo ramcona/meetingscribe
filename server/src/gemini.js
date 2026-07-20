@@ -2,6 +2,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { GoogleAIFileManager } from '@google/generative-ai/server';
 import { dbHelpers } from './db.js';
 import { getAudioDuration, normalizeAndRescaleSegments, formatTime } from './audioUtils.js';
+import { transcribeLocalAudio } from './localWhisper.js';
 import fs from 'fs';
 
 // Get the Gemini API Key
@@ -70,10 +71,16 @@ async function callGeminiWithRetry(apiCallFn, options = {}) {
   throw lastError;
 }
 
-// Transcribe audio file using Gemini API
+// Transcribe audio file using Gemini API or Local Whisper
 export async function transcribeAudio(meetingId, filePath) {
   const apiKey = getApiKey();
   const isTest = process.env.NODE_ENV === 'test';
+  const engine = dbHelpers.getSetting('transcription_engine') || 'auto';
+
+  if (engine === 'local_whisper' || (engine === 'auto' && !apiKey && !isTest)) {
+    console.log(`[Transcribe] Directing to local Whisper offline engine (engine=${engine}, keySet=${!!apiKey})...`);
+    return await transcribeLocalAudio(meetingId, filePath);
+  }
 
   const updateProgress = async (pct) => {
     const meeting = dbHelpers.getMeeting(meetingId);
