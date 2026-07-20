@@ -394,6 +394,8 @@ function buildSmartFallbackChapters(meeting, duration) {
   const chunkSize = duration / chunkCount;
   const chapters = [];
 
+  const fillerPattern = /^(halo|tes|tes tes|suara|masuk|siang|pagi|malam|oke|ya|iya|hallo|check|denger|bisa|terima kasih|makasih)\b/i;
+
   for (let i = 0; i < chunkCount; i++) {
     const startTime = Math.round(i * chunkSize);
     const endTime = Math.round((i + 1) * chunkSize);
@@ -401,23 +403,41 @@ function buildSmartFallbackChapters(meeting, duration) {
     const chunkSegs = segments.filter(s => s.start_time >= startTime && s.start_time < endTime);
     const targetSegs = chunkSegs.length > 0 ? chunkSegs : segments;
 
-    const firstSeg = targetSegs[0] || { text: 'Diskusi Sesi', speaker_name: 'Pembicara' };
-    const cleanText = firstSeg.text.trim();
-    
-    // Extract a meaningful sentence snippet for title
-    let title = cleanText.split('.')[0] || cleanText;
-    if (title.length > 45) {
-      title = title.substring(0, 42) + '...';
-    }
-    if (!title || title.length < 5) {
-      title = `Pembahasan Sub-Topik Bagian ${i + 1}`;
+    // Filter out filler / greeting lines
+    const contentSegs = targetSegs.filter(s => {
+      const txt = s.text.trim();
+      return txt.length > 12 && !fillerPattern.test(txt);
+    });
+
+    const activeSegs = contentSegs.length > 0 ? contentSegs : targetSegs;
+    const combinedText = activeSegs.map(s => s.text).join(' ');
+
+    // Extract meaningful topic keywords (words > 3 chars, excluding common stop words)
+    const words = combinedText
+      .replace(/[^\w\s\-\.]/gi, '')
+      .split(/\s+/)
+      .filter(w => w.length > 3 && !/^(yang|untuk|dengan|adalah|akan|pada|bisa|kalau|sudah|karena|tidak|nggak|paling|terkait|dalam|bagaimana|gimana|seperti|persen|mereka|kalian|kamu|bapak|saya|kita|tentang)\b/i.test(w));
+
+    // Select top unique topic keywords
+    const topKeywords = [...new Set(words.map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()))].slice(0, 3);
+
+    let title = '';
+    if (i === 0) {
+      title = topKeywords.length > 0 ? `Pembukaan & Topik ${topKeywords.join(' & ')}` : 'Pembukaan & Sesi Koordinasi Meeting';
+    } else if (topKeywords.length > 0) {
+      title = `Pembahasan: ${topKeywords.join(' & ')}`;
+    } else {
+      title = `Pembahasan Sesi Utama ${i + 1}`;
     }
 
-    // Construct informative summary from text in this chunk
-    const summaryExcerpt = targetSegs.map(s => s.text).join(' ');
-    let summary = summaryExcerpt.split('.').slice(0, 2).join('. ').trim();
-    if (!summary || summary.length < 10) {
-      summary = `Pembahasan rinci pada rentang waktu ${formatTime(startTime)} hingga ${formatTime(endTime)}.`;
+    if (title.length > 50) {
+      title = title.substring(0, 47) + '...';
+    }
+
+    // Construct informative summary sentence
+    let summary = activeSegs.map(s => s.text).slice(0, 2).join('. ').trim();
+    if (!summary || summary.length < 15) {
+      summary = `Diskusi dan pembahasan poin penting pada durasi ${formatTime(startTime)} hingga ${formatTime(endTime)}.`;
     } else if (summary.length > 150) {
       summary = summary.substring(0, 147) + '...';
     }
@@ -463,14 +483,16 @@ export async function generateChapters(meeting) {
       }).join('\n');
 
       const prompt = `
-        Berdasarkan transkrip meeting berikut, analisa pembicaraan secara mendalam dan bagi diskusi menjadi 3 hingga 6 Bab (Chapters / Topic Bookmarks) terstruktur.
+        Berdasarkan transkrip meeting berikut, analisa pembicaraan secara profesional dan bagi diskusi menjadi 3 hingga 6 Bab (Chapters / Topic Bookmarks) terstruktur.
         
-        PENTING:
-        - Judul Bab (title) HARUS spesifik, rinci, dan deskriptif berdasarkan isu/topik nyata yang dibicarakan (Contoh: "Evaluasi Arsitektur Database", "Skenario Uji Coba Offline Whisper", "Pembahasan Roadmap & Target Rilis"). DILARANG MENGGUNAKAN JUDUL GENERIK seperti "Agenda 1", "Topik 2", atau "Pembahasan Bagian 1".
-        - Ringkasan (summary) HARUS berisi 1-2 kalimat rinci tentang poin penting, kesepakatan, atau keputusan yang dicapai di bab tersebut.
+        ATURAN PENTING JUDUL BAB (title):
+        1. DILARANG MENGGUNAKAN UCAPAN / BANTER / SALAM BERSUARA SEPERTI "Halo", "Tes tes suara", "Siang Pak", "Oke", "Bisa take control" SEBAGAI JUDUL BAB.
+        2. Judul Bab HARUS BERUPA JUDUL TOPIK / AGENDA UTAMA RESMI (Contoh: "Pembahasan Arsitektur External Storage", "Diskusi Mekanisme Paging Data", "Review Akses Kontrol & System", "Pembukaan & Sesi Koordinasi").
+        3. Setiap bab harus mencerminkan substansi topik utama yang sedang dibahas pada rentang waktu tersebut.
+        4. Ringkasan (summary) HARUS berisi 1-2 kalimat deskriptif penjelasan poin atau keputusan yang dibahas di bab tersebut.
         
         Output WAJIB berupa JSON array of objects dengan struktur:
-        - title: string judul bab yang spesifik dan informatif (3-7 kata).
+        - title: string judul bab yang spesifik, formal, dan informatif (3-6 kata).
         - summary: string penjelasan rinci poin-poin yang dibahas.
         - start_time: number (waktu mulai bab dalam detik).
         - end_time: number (waktu selesai bab dalam detik).
