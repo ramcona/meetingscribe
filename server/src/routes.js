@@ -389,9 +389,11 @@ router.post('/settings', (req, res) => {
   }
 });
 
-// 13. Re-trigger transcription/analysis for a failed meeting
+// 13. Re-trigger transcription/analysis for a meeting with optional engine choice
 router.post('/meetings/:id/reanalyze', async (req, res) => {
   const meetingId = req.params.id;
+  const selectedEngine = req.body?.engine; // 'gemini' | 'local_whisper' | 'auto'
+
   try {
     const meeting = dbHelpers.getMeeting(meetingId);
     if (!meeting) {
@@ -401,16 +403,19 @@ router.post('/meetings/:id/reanalyze', async (req, res) => {
       return res.status(400).json({ error: 'No audio file available for reanalysis' });
     }
 
-    // Set status back to transcribing
-    dbHelpers.updateMeeting(meetingId, { status: 'transcribing' });
+    // Clear old transcript segments, chapters, and summaries before fresh re-transcription
+    dbHelpers.clearMeetingTranscript(meetingId);
 
-    // Re-trigger background transcription
-    transcribeAudio(meetingId, meeting.audio_path).catch((err) => {
+    // Set status back to transcribing with reset progress
+    dbHelpers.updateMeeting(meetingId, { status: 'transcribing', progress: 0 });
+
+    // Re-trigger background transcription using selected engine
+    transcribeAudio(meetingId, meeting.audio_path, { engine: selectedEngine }).catch((err) => {
       console.error(`Re-analysis transcription job failed for meeting ${meetingId}:`, err);
       dbHelpers.updateMeeting(meetingId, { status: 'failed' });
     });
 
-    res.json({ message: 'Reanalysis started successfully', status: 'transcribing' });
+    res.json({ message: 'Reanalysis started successfully', status: 'transcribing', engine: selectedEngine });
   } catch (error) {
     console.error('Error starting reanalysis:', error);
     res.status(500).json({ error: 'Failed to start reanalysis' });

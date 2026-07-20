@@ -282,26 +282,31 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
     }
   };
 
+  const [showEngineModal, setShowEngineModal] = useState(false);
+  const [selectedEngine, setSelectedEngine] = useState('local_whisper');
+
   const handleCopySummary = (content) => {
     navigator.clipboard.writeText(content);
     setCopySuccess(true);
     setTimeout(() => setCopySuccess(false), 2000);
   };
 
-  const handleReanalyze = async () => {
+  const handleReanalyze = async (engine = null) => {
     setReanalyzing(true);
     try {
       const res = await fetch(`http://localhost:3001/api/meetings/${meetingId}/reanalyze`, {
-        method: 'POST'
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ engine: engine || selectedEngine })
       });
       if (res.ok) {
-        // Force state status update to start polling
-        setMeeting(prev => prev ? { ...prev, status: 'transcribing' } : null);
+        setMeeting(prev => prev ? { ...prev, status: 'transcribing', progress: 0 } : null);
       }
     } catch (err) {
       console.error('Error starting reanalysis:', err);
     } finally {
       setReanalyzing(false);
+      setShowEngineModal(false);
     }
   };
 
@@ -614,11 +619,22 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
                 <h2 className="text-sm font-semibold text-white">Transcript</h2>
               </div>
               
-              {meeting.status === 'transcribing' && (
+              {meeting.status === 'transcribing' ? (
                 <div className="flex items-center gap-1.5 text-xs text-yellow-400 font-mono">
                   <RefreshCw size={12} className="animate-spin" />
                   Transcribing ({meeting.progress || 10}%)
                 </div>
+              ) : (
+                meeting.audio_path && (
+                  <button
+                    onClick={() => setShowEngineModal(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600/15 hover:bg-indigo-600/25 border border-indigo-500/25 text-indigo-300 hover:text-white text-xs font-semibold transition cursor-pointer"
+                    title="Transkrip Ulang / Ganti Engine Transkripsi"
+                  >
+                    <RefreshCw size={12} />
+                    <span>Re-Transkrip / Ganti Engine</span>
+                  </button>
+                )
               )}
             </div>
 
@@ -981,6 +997,98 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
           </div>
         </div>
       </div>
+
+      {/* Re-Transcribe Engine Selection Modal */}
+      {showEngineModal && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#16161A] border border-white/10 rounded-3xl p-6 max-w-md w-full space-y-6 shadow-2xl animate-fade-in">
+            <div className="flex items-center justify-between border-b border-white/5 pb-3">
+              <div className="flex items-center gap-2">
+                <Sparkles size={18} className="text-indigo-400" />
+                <h3 className="text-sm font-bold text-white">Re-Transkrip / Ganti Engine</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowEngineModal(false)}
+                className="text-gray-400 hover:text-white p-1 cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <p className="text-xs text-gray-400 leading-relaxed">
+              Pilih mesin transkripsi (engine) yang ingin Anda gunakan untuk memproses ulang audio meeting ini:
+            </p>
+
+            <div className="space-y-3">
+              <button
+                type="button"
+                onClick={() => setSelectedEngine('local_whisper')}
+                className={`w-full p-4 rounded-2xl border text-left flex items-start gap-3 transition cursor-pointer ${
+                  selectedEngine === 'local_whisper'
+                    ? 'bg-indigo-600/20 border-indigo-500/50 text-white shadow-lg shadow-indigo-600/10'
+                    : 'bg-black/30 border-white/5 text-gray-300 hover:bg-white/5'
+                }`}
+              >
+                <div className="p-2 bg-indigo-500/10 rounded-xl text-indigo-400 shrink-0 mt-0.5">
+                  <Mic size={18} />
+                </div>
+                <div>
+                  <div className="text-xs font-bold text-white flex items-center gap-2">
+                    Local Whisper (Offline Engine)
+                    <span className="text-[9px] bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-500/20 font-mono">100% Private</span>
+                  </div>
+                  <div className="text-[11px] text-gray-400 mt-1 leading-normal">
+                    Pemrosesan offline langsung di komputer Anda tanpa memerlukan API key atau koneksi internet.
+                  </div>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSelectedEngine('gemini')}
+                className={`w-full p-4 rounded-2xl border text-left flex items-start gap-3 transition cursor-pointer ${
+                  selectedEngine === 'gemini'
+                    ? 'bg-indigo-600/20 border-indigo-500/50 text-white shadow-lg shadow-indigo-600/10'
+                    : 'bg-black/30 border-white/5 text-gray-300 hover:bg-white/5'
+                }`}
+              >
+                <div className="p-2 bg-purple-500/10 rounded-xl text-purple-400 shrink-0 mt-0.5">
+                  <Sparkles size={18} />
+                </div>
+                <div>
+                  <div className="text-xs font-bold text-white flex items-center gap-2">
+                    Gemini AI (Cloud Engine)
+                    <span className="text-[9px] bg-purple-500/10 text-purple-300 px-2 py-0.5 rounded-full border border-purple-500/20 font-mono">AI Cloud</span>
+                  </div>
+                  <div className="text-[11px] text-gray-400 mt-1 leading-normal">
+                    Menggunakan Google Gemini AI cloud untuk transkripsi dan pemilahan pembicara otomatis yang presisi.
+                  </div>
+                </div>
+              </button>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 border-t border-white/5 pt-4">
+              <button
+                type="button"
+                onClick={() => setShowEngineModal(false)}
+                className="px-4 py-2 rounded-xl text-xs text-gray-400 hover:text-white transition cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={() => handleReanalyze(selectedEngine)}
+                disabled={reanalyzing}
+                className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition shadow-lg shadow-indigo-600/20 flex items-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                <RefreshCw size={12} className={reanalyzing ? 'animate-spin' : ''} />
+                <span>{reanalyzing ? 'Memproses...' : 'Mulai Re-Transkrip'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

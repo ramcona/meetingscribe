@@ -79,10 +79,10 @@ async function callGeminiWithRetry(apiCallFn, options = {}) {
 }
 
 // Transcribe audio file using Gemini API or Local Whisper
-export async function transcribeAudio(meetingId, filePath) {
+export async function transcribeAudio(meetingId, filePath, options = {}) {
   const apiKey = getApiKey();
   const isTest = process.env.NODE_ENV === 'test';
-  const engine = dbHelpers.getSetting('transcription_engine') || 'auto';
+  const engine = options.engine || dbHelpers.getSetting('transcription_engine') || 'auto';
 
   if (engine === 'local_whisper' || (engine === 'auto' && !apiKey && !isTest)) {
     console.log(`[Transcribe] Directing to local Whisper offline engine (engine=${engine}, keySet=${!!apiKey})...`);

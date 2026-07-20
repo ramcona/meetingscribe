@@ -208,6 +208,12 @@ export const dbHelpers = {
     return db.prepare('SELECT * FROM transcript_segments WHERE meeting_id = ? ORDER BY segment_order ASC').all(meetingId);
   },
 
+  clearMeetingTranscript(meetingId) {
+    db.prepare('DELETE FROM transcript_segments WHERE meeting_id = ?').run(meetingId);
+    db.prepare('DELETE FROM chapters WHERE meeting_id = ?').run(meetingId);
+    db.prepare('DELETE FROM summaries WHERE meeting_id = ?').run(meetingId);
+  },
+
   // Summary helpers
   addSummary(meetingId, type, content) {
     const id = crypto.randomUUID();
