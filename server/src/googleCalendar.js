@@ -48,8 +48,8 @@ export async function getUpcomingCalendarEvents() {
   const googleApiKey = dbHelpers.getSetting('google_api_key');
   const calendarId = dbHelpers.getSetting('google_calendar_id') || 'primary';
 
-  if (isTest || (!calendarUrl && !googleApiKey)) {
-    console.log('[Google Calendar] Mock/Offline mode active. Returning upcoming calendar events.');
+  if (isTest) {
+    console.log('[Google Calendar] Test mode active. Returning mock upcoming calendar events.');
     const now = new Date();
     return [
       {
@@ -73,6 +73,10 @@ export async function getUpcomingCalendarEvents() {
         attendees: [{ displayName: 'Charlie Client' }]
       }
     ];
+  }
+
+  if (!calendarUrl && !googleApiKey) {
+    return [];
   }
 
   // 1. Fetch via Google Calendar Secret iCal Feed URL

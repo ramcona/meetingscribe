@@ -96,6 +96,15 @@ export function initDb() {
   } catch (err) {
     // Column already exists, ignore
   }
+
+  // Remove leftover dummy test events outside of test mode
+  if (process.env.NODE_ENV !== 'test') {
+    try {
+      db.prepare("DELETE FROM meetings WHERE google_event_id LIKE 'gcal_event_%'").run();
+    } catch (err) {
+      // Ignore
+    }
+  }
 }
 
 // Ensure the DB is initialized when this module is imported
