@@ -6,7 +6,7 @@ import { fileURLToPath } from 'url';
 import { dbHelpers } from './db.js';
 import { transcribeAudio, generateRecapOrMom, generateChapters } from './gemini.js';
 import { getAudioDuration } from './audioUtils.js';
-import { getUpcomingCalendarEvents } from './googleCalendar.js';
+import { getUpcomingCalendarEvents, parseICalEvents } from './googleCalendar.js';
 
 const router = express.Router();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -310,6 +310,21 @@ router.post('/calendar/import', (req, res) => {
   } catch (error) {
     console.error('Error importing calendar event:', error);
     res.status(500).json({ error: 'Failed to import calendar event' });
+  }
+});
+
+// 10f. Upload and parse .ics calendar file
+router.post('/calendar/upload-ics', express.text({ limit: '10mb' }), (req, res) => {
+  try {
+    const icalContent = req.body;
+    if (!icalContent) {
+      return res.status(400).json({ error: 'No .ics content provided' });
+    }
+    const events = parseICalEvents(icalContent);
+    res.json(events);
+  } catch (error) {
+    console.error('Error parsing uploaded .ics:', error);
+    res.status(500).json({ error: 'Failed to parse .ics file' });
   }
 });
 

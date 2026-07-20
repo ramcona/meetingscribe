@@ -88,6 +88,27 @@ export default function Dashboard({ onSelectMeeting, onCreateNew }) {
     }
   };
 
+  const handleIcsFileUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    try {
+      const text = await file.text();
+      const res = await fetch('http://localhost:3001/api/calendar/upload-ics', {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: text
+      });
+
+      if (res.ok) {
+        const events = await res.json();
+        setCalendarEvents(events);
+      }
+    } catch (err) {
+      console.error('Error uploading .ics file:', err);
+    }
+  };
+
   useEffect(() => {
     if (!search.trim()) {
       setSearchResults(null);
@@ -503,49 +524,68 @@ export default function Dashboard({ onSelectMeeting, onCreateNew }) {
               <div className="py-8 text-center text-xs text-gray-500 font-mono">
                 Mengambil agenda Google Calendar...
               </div>
-            ) : calendarEvents.length === 0 ? (
-              <div className="py-8 text-center space-y-2">
-                <p className="text-xs text-gray-400">Tidak ada agenda mendatang ditemukan.</p>
-                <p className="text-[11px] text-gray-500">
-                  Konfigurasikan iCal Feed URL di halaman Settings untuk menyambungkan Google Calendar Anda secara langsung.
-                </p>
-              </div>
             ) : (
-              <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
-                {calendarEvents.map((evt) => (
-                  <div
-                    key={evt.id}
-                    className="bg-black/40 hover:bg-white/5 border border-white/5 hover:border-indigo-500/30 rounded-2xl p-4 flex items-center justify-between gap-4 transition group"
-                  >
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2">
-                        <h4 className="text-xs font-bold text-white group-hover:text-indigo-400 transition">
-                          {evt.summary}
-                        </h4>
-                        <span className="text-[10px] font-mono text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded-full">
-                          {formatDate(evt.start ? evt.start.dateTime : new Date())}
-                        </span>
-                      </div>
-                      {evt.description && (
-                        <p className="text-[11px] text-gray-400 line-clamp-1 leading-relaxed">
-                          {evt.description}
-                        </p>
-                      )}
-                      {evt.location && (
-                        <div className="text-[10px] font-mono text-gray-500">
-                          📍 {evt.location}
-                        </div>
-                      )}
-                    </div>
-
-                    <button
-                      onClick={() => handleImportCalendarEvent(evt)}
-                      className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium px-3.5 py-2 rounded-xl transition shadow shrink-0 cursor-pointer"
-                    >
-                      Mulai Merekam
-                    </button>
+              <div className="space-y-4">
+                {/* Drag and Drop / File upload option */}
+                <div className="bg-black/30 border border-dashed border-white/10 hover:border-indigo-500/40 rounded-2xl p-4 flex flex-col items-center justify-center text-center space-y-2 transition">
+                  <div className="text-xs text-gray-300 font-semibold">
+                    Unggah File Kalender (.ics)
                   </div>
-                ))}
+                  <p className="text-[11px] text-gray-500 max-w-xs">
+                    Sudah mengunduh file `.ics` dari Google Calendar Export? Unggah langsung di sini.
+                  </p>
+                  <label className="bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-400 border border-indigo-500/20 text-xs font-semibold px-3 py-1.5 rounded-xl cursor-pointer transition">
+                    Pilih File .ics
+                    <input
+                      type="file"
+                      accept=".ics"
+                      onChange={handleIcsFileUpload}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+
+                {calendarEvents.length > 0 && (
+                  <div className="space-y-3 max-h-64 overflow-y-auto pr-1">
+                    <div className="text-[10px] font-mono text-gray-500 uppercase tracking-wider">
+                      Agenda Mendatang:
+                    </div>
+                    {calendarEvents.map((evt) => (
+                      <div
+                        key={evt.id}
+                        className="bg-black/40 hover:bg-white/5 border border-white/5 hover:border-indigo-500/30 rounded-2xl p-4 flex items-center justify-between gap-4 transition group"
+                      >
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <h4 className="text-xs font-bold text-white group-hover:text-indigo-400 transition">
+                              {evt.summary}
+                            </h4>
+                            <span className="text-[10px] font-mono text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded-full">
+                              {formatDate(evt.start ? evt.start.dateTime : new Date())}
+                            </span>
+                          </div>
+                          {evt.description && (
+                            <p className="text-[11px] text-gray-400 line-clamp-1 leading-relaxed">
+                              {evt.description}
+                            </p>
+                          )}
+                          {evt.location && (
+                            <div className="text-[10px] font-mono text-gray-500">
+                              📍 {evt.location}
+                            </div>
+                          )}
+                        </div>
+
+                        <button
+                          onClick={() => handleImportCalendarEvent(evt)}
+                          className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium px-3.5 py-2 rounded-xl transition shadow shrink-0 cursor-pointer"
+                        >
+                          Mulai Merekam
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 
