@@ -378,7 +378,56 @@ export async function generateRecapOrMom(meeting, type, language = 'id') {
   }
 }
 
-// Generate topic chapters / agenda markers using Gemini API or local interval partition
+// Helper to build detailed, transcript-driven chapters when offline or fallback is needed
+function buildSmartFallbackChapters(meeting, duration) {
+  const segments = meeting.segments || [];
+  if (segments.length === 0) return [];
+
+  const chunkCount = Math.min(5, Math.max(2, Math.ceil(duration / 300)));
+  const chunkSize = duration / chunkCount;
+  const chapters = [];
+
+  for (let i = 0; i < chunkCount; i++) {
+    const startTime = Math.round(i * chunkSize);
+    const endTime = Math.round((i + 1) * chunkSize);
+
+    const chunkSegs = segments.filter(s => s.start_time >= startTime && s.start_time < endTime);
+    const targetSegs = chunkSegs.length > 0 ? chunkSegs : segments;
+
+    const firstSeg = targetSegs[0] || { text: 'Diskusi Sesi', speaker_name: 'Pembicara' };
+    const cleanText = firstSeg.text.trim();
+    
+    // Extract a meaningful sentence snippet for title
+    let title = cleanText.split('.')[0] || cleanText;
+    if (title.length > 45) {
+      title = title.substring(0, 42) + '...';
+    }
+    if (!title || title.length < 5) {
+      title = `Pembahasan Sub-Topik Bagian ${i + 1}`;
+    }
+
+    // Construct informative summary from text in this chunk
+    const summaryExcerpt = targetSegs.map(s => s.text).join(' ');
+    let summary = summaryExcerpt.split('.').slice(0, 2).join('. ').trim();
+    if (!summary || summary.length < 10) {
+      summary = `Pembahasan rinci pada rentang waktu ${formatTime(startTime)} hingga ${formatTime(endTime)}.`;
+    } else if (summary.length > 150) {
+      summary = summary.substring(0, 147) + '...';
+    }
+
+    chapters.push({
+      title: title,
+      summary: summary,
+      start_time: startTime,
+      end_time: endTime,
+      chapter_order: i + 1
+    });
+  }
+
+  return chapters;
+}
+
+// Generate topic chapters / agenda markers using Gemini API or smart transcript extraction
 export async function generateChapters(meeting) {
   const apiKey = getApiKey();
   const isTest = process.env.NODE_ENV === 'test';
@@ -389,8 +438,8 @@ export async function generateChapters(meeting) {
 
   const duration = meeting.duration_seconds || Math.max(...meeting.segments.map(s => s.end_time));
 
-  if (isTest || !apiKey) {
-    console.log(`[Chapters] Generating mock/offline chapters for meeting ${meeting.id}`);
+  if (isTest) {
+    console.log(`[Chapters] Test mode active for meeting ${meeting.id}`);
     const chaps = [
       { title: 'Pembukaan & Koordinasi Team', summary: 'Diskusi awal dan pembukaan meeting', start_time: 0, end_time: Math.min(duration, 300), chapter_order: 1 },
       { title: 'Pembahasan Utama & Action Items', summary: 'Diskusi teknis dan pembagian tugas', start_time: Math.min(duration, 305), end_time: duration, chapter_order: 2 }
@@ -399,69 +448,64 @@ export async function generateChapters(meeting) {
     return chaps;
   }
 
-  try {
-    const transcriptText = meeting.segments.map(seg => {
-      const name = seg.speaker_name || seg.speaker_label;
-      return `[${formatTime(seg.start_time)} - ${formatTime(seg.end_time)}] ${name}: ${seg.text}`;
-    }).join('\n');
+  if (apiKey) {
+    try {
+      const transcriptText = meeting.segments.map(seg => {
+        const name = seg.speaker_name || seg.speaker_label;
+        return `[${formatTime(seg.start_time)} - ${formatTime(seg.end_time)}] ${name}: ${seg.text}`;
+      }).join('\n');
 
-    const prompt = `
-      Berdasarkan transkrip meeting berikut, bagi diskusi menjadi 3 hingga 6 Bab (Chapters / Topic Bookmarks) terstruktur berdasarkan topik pembicaraan.
-      
-      Output WAJIB berupa JSON array of objects. Setiap object memiliki:
-      - title: string singkat judul bab/topik (maksimal 6 kata).
-      - summary: string penjelasan 1 kalimat mengenai apa yang dibahas di bab ini.
-      - start_time: number (waktu mulai bab dalam detik).
-      - end_time: number (waktu selesai bab dalam detik).
-      
-      Metadata:
-      - Judul: ${meeting.title}
-      - Durasi Total: ${duration} detik
-      
-      Transkrip:
-      ${transcriptText}
-      
-      PENTING: Balas HANYA dengan JSON array yang valid tanpa markdown.
-    `;
+      const prompt = `
+        Berdasarkan transkrip meeting berikut, analisa pembicaraan secara mendalam dan bagi diskusi menjadi 3 hingga 6 Bab (Chapters / Topic Bookmarks) terstruktur.
+        
+        PENTING:
+        - Judul Bab (title) HARUS spesifik, rinci, dan deskriptif berdasarkan isu/topik nyata yang dibicarakan (Contoh: "Evaluasi Arsitektur Database", "Skenario Uji Coba Offline Whisper", "Pembahasan Roadmap & Target Rilis"). DILARANG MENGGUNAKAN JUDUL GENERIK seperti "Agenda 1", "Topik 2", atau "Pembahasan Bagian 1".
+        - Ringkasan (summary) HARUS berisi 1-2 kalimat rinci tentang poin penting, kesepakatan, atau keputusan yang dicapai di bab tersebut.
+        
+        Output WAJIB berupa JSON array of objects dengan struktur:
+        - title: string judul bab yang spesifik dan informatif (3-7 kata).
+        - summary: string penjelasan rinci poin-poin yang dibahas.
+        - start_time: number (waktu mulai bab dalam detik).
+        - end_time: number (waktu selesai bab dalam detik).
+        
+        Metadata Meeting:
+        - Judul: ${meeting.title}
+        - Durasi Total: ${duration} detik
+        
+        Transkrip Lengkap:
+        ${transcriptText}
+        
+        Balas HANYA dengan JSON array yang valid tanpa markdown.
+      `;
 
-    const response = await callGeminiWithRetry(async (modelName) => {
-      const genAI = new GoogleGenerativeAI(apiKey);
-      const model = genAI.getGenerativeModel({ model: modelName });
-      return await model.generateContent({
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: { responseMimeType: 'application/json' }
+      const response = await callGeminiWithRetry(async (modelName) => {
+        const genAI = new GoogleGenerativeAI(apiKey);
+        const model = genAI.getGenerativeModel({ model: modelName });
+        return await model.generateContent({
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          generationConfig: { responseMimeType: 'application/json' }
+        });
       });
-    });
 
-    const parsed = JSON.parse(response.response.text());
-    if (Array.isArray(parsed) && parsed.length > 0) {
-      const sanitized = parsed.map((item, idx) => ({
-        title: item.title || `Topik ${idx + 1}`,
-        summary: item.summary || '',
-        start_time: Math.min(duration, Math.max(0, parseFloat(item.start_time) || 0)),
-        end_time: Math.min(duration, Math.max(0, parseFloat(item.end_time) || duration)),
-        chapter_order: idx + 1
-      }));
-      dbHelpers.addChapters(meeting.id, sanitized);
-      return sanitized;
+      const parsed = JSON.parse(response.response.text());
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const sanitized = parsed.map((item, idx) => ({
+          title: item.title || `Pembahasan Topik ${idx + 1}`,
+          summary: item.summary || '',
+          start_time: Math.min(duration, Math.max(0, parseFloat(item.start_time) || 0)),
+          end_time: Math.min(duration, Math.max(0, parseFloat(item.end_time) || duration)),
+          chapter_order: idx + 1
+        }));
+        dbHelpers.addChapters(meeting.id, sanitized);
+        return sanitized;
+      }
+    } catch (err) {
+      console.error(`[Chapters Error] Failed to generate chapters with Gemini AI:`, err);
     }
-  } catch (err) {
-    console.error(`[Chapters Error] Failed to generate chapters:`, err);
   }
 
-  // Fallback to time interval partitioning if parsing failed
-  const chunkCount = Math.min(4, Math.max(2, Math.ceil(duration / 300)));
-  const chunkSize = duration / chunkCount;
-  const fallbackChaps = [];
-  for (let i = 0; i < chunkCount; i++) {
-    fallbackChaps.push({
-      title: `Agenda / Topik ${i + 1}`,
-      summary: `Pembahasan bagian ${i + 1}`,
-      start_time: Math.round(i * chunkSize),
-      end_time: Math.round((i + 1) * chunkSize),
-      chapter_order: i + 1
-    });
-  }
-  dbHelpers.addChapters(meeting.id, fallbackChaps);
-  return fallbackChaps;
+  // Smart transcript-driven fallback if offline or API error occurred
+  const smartChaps = buildSmartFallbackChapters(meeting, duration);
+  dbHelpers.addChapters(meeting.id, smartChaps);
+  return smartChaps;
 }
