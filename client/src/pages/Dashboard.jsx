@@ -37,9 +37,56 @@ export default function Dashboard({ onSelectMeeting, onCreateNew }) {
 
   const [searchResults, setSearchResults] = useState(null);
 
+  const [isCalendarModalOpen, setIsCalendarModalOpen] = useState(false);
+  const [calendarEvents, setCalendarEvents] = useState([]);
+  const [loadingCalendar, setLoadingCalendar] = useState(false);
+
   useEffect(() => {
     fetchMeetings();
   }, []);
+
+  const fetchCalendarEvents = async () => {
+    setLoadingCalendar(true);
+    try {
+      const res = await fetch('http://localhost:3001/api/calendar/events');
+      if (res.ok) {
+        const data = await res.json();
+        setCalendarEvents(data);
+      }
+    } catch (err) {
+      console.error('Error fetching Google Calendar events:', err);
+    } finally {
+      setLoadingCalendar(false);
+    }
+  };
+
+  const handleOpenCalendarModal = () => {
+    setIsCalendarModalOpen(true);
+    fetchCalendarEvents();
+  };
+
+  const handleImportCalendarEvent = async (event) => {
+    try {
+      const res = await fetch('http://localhost:3001/api/calendar/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          summary: event.summary,
+          description: event.description,
+          client: event.client || (event.attendees && event.attendees.length ? event.attendees[0].displayName : ''),
+          meeting_type: event.meeting_type || 'offline'
+        })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setIsCalendarModalOpen(false);
+        onCreateNew(data.id);
+      }
+    } catch (err) {
+      console.error('Error importing calendar event:', err);
+    }
+  };
 
   useEffect(() => {
     if (!search.trim()) {
@@ -191,13 +238,23 @@ export default function Dashboard({ onSelectMeeting, onCreateNew }) {
           <p className="text-sm text-gray-400">Manage, record, search, and summarize your meetings</p>
         </div>
 
-        <button
-          onClick={() => setIsModalOpen(true)}
-          className="bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium px-4 py-2.5 rounded-xl flex items-center justify-center gap-2 transition shadow-lg shadow-indigo-600/15 border border-indigo-500/10 cursor-pointer"
-        >
-          <Plus size={16} />
-          New Meeting
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleOpenCalendarModal}
+            className="bg-white/5 hover:bg-white/10 text-white text-sm font-medium px-4 py-2.5 rounded-xl flex items-center justify-center gap-2 transition border border-white/5 cursor-pointer"
+          >
+            <Calendar size={16} className="text-indigo-400" />
+            Sync Google Calendar
+          </button>
+
+          <button
+            onClick={() => setIsModalOpen(true)}
+            className="bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium px-4 py-2.5 rounded-xl flex items-center justify-center gap-2 transition shadow-lg shadow-indigo-600/15 border border-indigo-500/10 cursor-pointer"
+          >
+            <Plus size={16} />
+            New Meeting
+          </button>
+        </div>
       </div>
 
       {/* Filter and Search Bar */}
@@ -415,6 +472,91 @@ export default function Dashboard({ onSelectMeeting, onCreateNew }) {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Google Calendar Events Modal */}
+      {isCalendarModalOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="bg-[#111113] border border-white/5 rounded-3xl p-6 w-full max-w-lg space-y-6 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-white/5 pb-4">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-indigo-500/10 text-indigo-400 rounded-xl border border-indigo-500/20">
+                  <Calendar size={18} />
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-white">Google Calendar Sync</h2>
+                  <p className="text-xs text-gray-400">Pilih agenda Google Calendar untuk langsung membuat draft meeting</p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setIsCalendarModalOpen(false)}
+                className="text-gray-500 hover:text-white p-1 text-xs transition"
+              >
+                ✕
+              </button>
+            </div>
+
+            {loadingCalendar ? (
+              <div className="py-8 text-center text-xs text-gray-500 font-mono">
+                Mengambil agenda Google Calendar...
+              </div>
+            ) : calendarEvents.length === 0 ? (
+              <div className="py-8 text-center space-y-2">
+                <p className="text-xs text-gray-400">Tidak ada agenda mendatang ditemukan.</p>
+                <p className="text-[11px] text-gray-500">
+                  Konfigurasikan iCal Feed URL di halaman Settings untuk menyambungkan Google Calendar Anda secara langsung.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
+                {calendarEvents.map((evt) => (
+                  <div
+                    key={evt.id}
+                    className="bg-black/40 hover:bg-white/5 border border-white/5 hover:border-indigo-500/30 rounded-2xl p-4 flex items-center justify-between gap-4 transition group"
+                  >
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <h4 className="text-xs font-bold text-white group-hover:text-indigo-400 transition">
+                          {evt.summary}
+                        </h4>
+                        <span className="text-[10px] font-mono text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded-full">
+                          {formatDate(evt.start ? evt.start.dateTime : new Date())}
+                        </span>
+                      </div>
+                      {evt.description && (
+                        <p className="text-[11px] text-gray-400 line-clamp-1 leading-relaxed">
+                          {evt.description}
+                        </p>
+                      )}
+                      {evt.location && (
+                        <div className="text-[10px] font-mono text-gray-500">
+                          📍 {evt.location}
+                        </div>
+                      )}
+                    </div>
+
+                    <button
+                      onClick={() => handleImportCalendarEvent(evt)}
+                      className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium px-3.5 py-2 rounded-xl transition shadow shrink-0 cursor-pointer"
+                    >
+                      Mulai Merekam
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="pt-2 flex justify-end">
+              <button
+                onClick={() => setIsCalendarModalOpen(false)}
+                className="bg-white/5 hover:bg-white/10 text-white text-xs font-medium px-4 py-2.5 rounded-xl border border-white/5 transition cursor-pointer"
+              >
+                Tutup
+              </button>
+            </div>
           </div>
         </div>
       )}

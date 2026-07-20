@@ -10,6 +10,9 @@ export default function Settings() {
 
   const [transcriptionEngine, setTranscriptionEngine] = useState('auto'); // 'auto' | 'gemini' | 'local_whisper'
 
+  const [googleCalendarUrl, setGoogleCalendarUrl] = useState('');
+  const [googleApiKey, setGoogleApiKey] = useState('');
+
   useEffect(() => {
     fetchSettings();
     checkPermission();
@@ -23,6 +26,9 @@ export default function Settings() {
         setIsKeySet(data.gemini_api_key_set);
         if (data.transcription_engine) {
           setTranscriptionEngine(data.transcription_engine);
+        }
+        if (data.google_calendar_ical_url) {
+          setGoogleCalendarUrl(data.google_calendar_ical_url);
         }
       }
     } catch (err) {
@@ -62,9 +68,15 @@ export default function Settings() {
     setMessage({ text: '', type: '' });
 
     try {
-      const payload = { transcription_engine: transcriptionEngine };
+      const payload = {
+        transcription_engine: transcriptionEngine,
+        google_calendar_ical_url: googleCalendarUrl.trim()
+      };
       if (apiKey.trim()) {
         payload.gemini_api_key = apiKey.trim();
+      }
+      if (googleApiKey.trim()) {
+        payload.google_api_key = googleApiKey.trim();
       }
 
       const res = await fetch('http://localhost:3001/api/settings', {
@@ -77,6 +89,7 @@ export default function Settings() {
         setMessage({ text: 'Pengaturan berhasil disimpan!', type: 'success' });
         if (apiKey.trim()) setIsKeySet(true);
         setApiKey('');
+        setGoogleApiKey('');
       } else {
         setMessage({ text: 'Gagal menyimpan pengaturan.', type: 'error' });
       }
@@ -154,6 +167,23 @@ export default function Settings() {
                 </div>
                 <p className="text-xs text-gray-500 mt-2">
                   API Key disimpan secara lokal di database SQLite komputer Anda dan hanya digunakan untuk memanggil Gemini API.
+                </p>
+              </div>
+
+              {/* Google Calendar iCal Feed URL */}
+              <div className="border-t border-white/5 pt-4 space-y-2">
+                <label className="block text-xs font-mono text-gray-400 uppercase tracking-wider">
+                  Google Calendar iCal Feed URL (Opsional)
+                </label>
+                <input
+                  type="url"
+                  value={googleCalendarUrl}
+                  onChange={(e) => setGoogleCalendarUrl(e.target.value)}
+                  placeholder="https://calendar.google.com/calendar/ical/your_email/private-xxxx/basic.ics"
+                  className="w-full bg-black/40 border border-white/10 focus:border-indigo-500/50 rounded-xl px-4 py-3 text-xs text-white placeholder-gray-600 focus:outline-none transition"
+                />
+                <p className="text-[11px] text-gray-500 leading-relaxed">
+                  Dapatkan dari <strong>Google Calendar Settings → Integration → Secret address in iCal format</strong> untuk otomatis mengimpor agenda meeting harian Anda tanpa OAuth kompleks.
                 </p>
               </div>
 

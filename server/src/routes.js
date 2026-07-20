@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import { dbHelpers } from './db.js';
 import { transcribeAudio, generateRecapOrMom, generateChapters } from './gemini.js';
 import { getAudioDuration } from './audioUtils.js';
+import { getUpcomingCalendarEvents } from './googleCalendar.js';
 
 const router = express.Router();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -278,14 +279,52 @@ router.get('/meetings/:id/chapters', (req, res) => {
   }
 });
 
+// 10d. Fetch Google Calendar Upcoming Events
+router.get('/calendar/events', async (req, res) => {
+  try {
+    const events = await getUpcomingCalendarEvents();
+    res.json(events);
+  } catch (error) {
+    console.error('Error fetching calendar events:', error);
+    res.status(500).json({ error: 'Failed to fetch calendar events' });
+  }
+});
+
+// 10e. Import Google Calendar Event to create Meeting Draft
+router.post('/calendar/import', (req, res) => {
+  const { summary, description, client, meeting_type } = req.body;
+  if (!summary) {
+    return res.status(400).json({ error: 'Event summary / title is required' });
+  }
+
+  try {
+    const meetingId = dbHelpers.createMeeting({
+      title: summary,
+      description: description || '',
+      client: client || '',
+      meeting_type: meeting_type || 'offline'
+    });
+
+    const meeting = dbHelpers.getMeeting(meetingId);
+    res.json(meeting);
+  } catch (error) {
+    console.error('Error importing calendar event:', error);
+    res.status(500).json({ error: 'Failed to import calendar event' });
+  }
+});
+
 // 11. Get settings
 router.get('/settings', (req, res) => {
   try {
     const apiKey = dbHelpers.getSetting('gemini_api_key');
     const engine = dbHelpers.getSetting('transcription_engine') || 'auto';
+    const icalUrl = dbHelpers.getSetting('google_calendar_ical_url') || '';
+    const googleApiKey = dbHelpers.getSetting('google_api_key') || '';
     res.json({
       gemini_api_key_set: !!apiKey,
       transcription_engine: engine,
+      google_calendar_ical_url: icalUrl,
+      google_api_key_set: !!googleApiKey,
       app_name: process.env.APP_NAME || 'MeetingScribe'
     });
   } catch (error) {
@@ -296,13 +335,19 @@ router.get('/settings', (req, res) => {
 
 // 12. Save settings
 router.post('/settings', (req, res) => {
-  const { gemini_api_key, transcription_engine } = req.body;
+  const { gemini_api_key, transcription_engine, google_calendar_ical_url, google_api_key } = req.body;
   try {
     if (gemini_api_key !== undefined) {
       dbHelpers.setSetting('gemini_api_key', gemini_api_key);
     }
     if (transcription_engine !== undefined) {
       dbHelpers.setSetting('transcription_engine', transcription_engine);
+    }
+    if (google_calendar_ical_url !== undefined) {
+      dbHelpers.setSetting('google_calendar_ical_url', google_calendar_ical_url);
+    }
+    if (google_api_key !== undefined) {
+      dbHelpers.setSetting('google_api_key', google_api_key);
     }
     res.json({ message: 'Settings saved successfully' });
   } catch (error) {
