@@ -48,6 +48,10 @@ export default function Dashboard({ onSelectMeeting, onCreateNew }) {
   const fetchCalendarEvents = async () => {
     setLoadingCalendar(true);
     try {
+      // Perform live sync first to create/update draft meetings from calendar
+      await fetch('http://localhost:3001/api/calendar/sync', { method: 'POST' });
+      fetchMeetings(); // refresh dashboard meeting list with updated calendar items
+
       const res = await fetch('http://localhost:3001/api/calendar/events');
       if (res.ok) {
         const data = await res.json();

@@ -321,10 +321,28 @@ router.post('/calendar/upload-ics', express.text({ limit: '10mb' }), (req, res) 
       return res.status(400).json({ error: 'No .ics content provided' });
     }
     const events = parseICalEvents(icalContent);
-    res.json(events);
+    const result = dbHelpers.upsertGoogleCalendarEvents(events);
+    res.json({ events, created: result.created, updated: result.updated });
   } catch (error) {
     console.error('Error parsing uploaded .ics:', error);
     res.status(500).json({ error: 'Failed to parse .ics file' });
+  }
+});
+
+// 10g. Perform live background sync with Google Calendar
+router.post('/calendar/sync', async (req, res) => {
+  try {
+    const events = await getUpcomingCalendarEvents();
+    const result = dbHelpers.upsertGoogleCalendarEvents(events);
+    res.json({
+      message: 'Google Calendar synced successfully',
+      created: result.created,
+      updated: result.updated,
+      total_events: events.length
+    });
+  } catch (error) {
+    console.error('Error syncing Google Calendar:', error);
+    res.status(500).json({ error: 'Failed to sync Google Calendar' });
   }
 });
 

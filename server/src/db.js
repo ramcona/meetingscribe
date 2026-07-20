@@ -91,6 +91,11 @@ export function initDb() {
   } catch (err) {
     // Column already exists, ignore
   }
+  try {
+    db.prepare('ALTER TABLE meetings ADD COLUMN google_event_id TEXT').run();
+  } catch (err) {
+    // Column already exists, ignore
+  }
 }
 
 // Ensure the DB is initialized when this module is imported
@@ -286,6 +291,49 @@ export const dbHelpers = {
 
   getChapters(meetingId) {
     return db.prepare('SELECT * FROM chapters WHERE meeting_id = ? ORDER BY chapter_order ASC').all(meetingId);
+  },
+
+  // Auto-sync Google Calendar events helper
+  upsertGoogleCalendarEvents(events) {
+    if (!events || events.length === 0) return { created: 0, updated: 0 };
+
+    let created = 0;
+    let updated = 0;
+
+    const findStmt = db.prepare('SELECT id, status FROM meetings WHERE google_event_id = ?');
+    const insertStmt = db.prepare(`
+      INSERT INTO meetings (id, google_event_id, title, description, client, meeting_type, status)
+      VALUES (?, ?, ?, ?, ?, ?, 'draft')
+    `);
+    const updateStmt = db.prepare(`
+      UPDATE meetings
+      SET title = ?, description = ?, client = ?, meeting_type = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE google_event_id = ?
+    `);
+
+    const transaction = db.transaction((evtList) => {
+      for (const evt of evtList) {
+        if (!evt.id || !evt.summary) continue;
+        const existing = findStmt.get(evt.id);
+
+        const title = evt.summary;
+        const description = evt.description || '';
+        const client = evt.client || (evt.attendees && evt.attendees.length ? (evt.attendees[0].displayName || evt.attendees[0].email) : '');
+        const meetingType = evt.meeting_type || 'offline';
+
+        if (existing) {
+          updateStmt.run(title, description, client, meetingType, evt.id);
+          updated++;
+        } else {
+          const newId = crypto.randomUUID();
+          insertStmt.run(newId, evt.id, title, description, client, meetingType);
+          created++;
+        }
+      }
+    });
+
+    transaction(events);
+    return { created, updated };
   }
 };
 

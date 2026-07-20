@@ -34,6 +34,24 @@ const server = app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
   if (process.env.NODE_ENV !== 'test') {
     import('./audioUtils.js').then(m => m.repairDatabaseAudioDurationsAndTimestamps()).catch(err => console.error(err));
+
+    // Background Google Calendar auto-sync loop (every 60 seconds)
+    const runAutoCalendarSync = async () => {
+      try {
+        const { getUpcomingCalendarEvents } = await import('./googleCalendar.js');
+        const { dbHelpers } = await import('./db.js');
+        const events = await getUpcomingCalendarEvents();
+        if (events && events.length > 0) {
+          dbHelpers.upsertGoogleCalendarEvents(events);
+        }
+      } catch (err) {
+        // Silent sync catch
+      }
+    };
+
+    // Initial sync on startup & 60-second polling interval
+    runAutoCalendarSync();
+    setInterval(runAutoCalendarSync, 60000);
   }
 });
 
