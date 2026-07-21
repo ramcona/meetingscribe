@@ -180,86 +180,90 @@ export async function transcribeAudio(meetingId, filePath, options = {}) {
 
     const fileManager = new GoogleAIFileManager(apiKey);
     
-    console.log(`[Gemini] Uploading ${filePath} to Gemini Files API...`);
+    console.log(`[Gemini Privacy Guard] Uploading ${filePath} to Gemini Files API...`);
     const uploadResult = await fileManager.uploadFile(filePath, {
       mimeType: 'audio/webm',
       displayName: `meeting-${meetingId}`
     });
-    console.log(`[Gemini] Uploaded successfully: ${uploadResult.file.uri}`);
-    if (!(await updateProgress(30))) return;
+    console.log(`[Gemini Privacy Guard] Uploaded successfully: ${uploadResult.file.uri}`);
 
-    // Wait for the uploaded file to be processed by Google Files API
-    let fileState = 'PROCESSING';
-    let attempts = 0;
-    while (fileState === 'PROCESSING' && attempts < 10) {
-      attempts++;
-      if (!(await updateProgress(Math.min(30 + attempts * 5, 55)))) return;
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      const fileInfo = await fileManager.getFile(uploadResult.file.name);
-      fileState = fileInfo.state;
-      console.log(`[Gemini] File state query attempt ${attempts}: ${fileState}`);
-    }
-    
-    if (fileState !== 'ACTIVE') {
-      throw new Error(`File upload processing failed. State: ${fileState}`);
-    }
-    if (!(await updateProgress(60))) return;
+    let textResponse = null;
 
-    const durationInfoText = audioDuration > 0
-      ? `Durasi total audio ini adalah ${audioDuration} detik (${formatTime(audioDuration)}).\nPENTING: start_time dan end_time HARUS presisi dan berada di dalam rentang 0.0 hingga ${audioDuration}.0 detik. Waktu selesai (end_time) segmen terakhir TIDAK BOLEH melebihi ${audioDuration} detik.`
-      : '';
-
-    const prompt = `
-      Kamu adalah asisten transkripsi profesional. Dengarkan audio rekaman meeting ini dan buatlah transkrip lengkap.
-      Lakukan juga speaker diarization dengan mendeteksi siapa yang sedang berbicara secara konsisten sepanjang audio.
-      ${durationInfoText}
-      
-      Hasilkan output dalam format JSON array of objects. Setiap object wajib memiliki property berikut:
-      - speaker_label: string dengan format "Orang 1", "Orang 2", dst. untuk melabeli pembicara secara konsisten (orang yang sama harus mendapat label yang sama).
-      - start_time: number (waktu mulai berbicara dalam detik).
-      - end_time: number (waktu selesai berbicara dalam detik).
-      - text: string verbatim dari ucapan pembicara dalam bahasa aslinya (Indonesia/Inggris campur oke).
-      
-      PENTING: Balas HANYA dengan JSON array yang valid, tanpa penjelasan markdown prefix \`\`\`json atau suffix apa pun.
-    `;
-
-    // Execute content generation with retry and model fallback support
-    const response = await callGeminiWithRetry(async (modelName) => {
-      const genAI = new GoogleGenerativeAI(apiKey);
-      const model = genAI.getGenerativeModel({ model: modelName });
-      console.log(`[Gemini] Invoking model ${modelName} for audio diarization...`);
-      return await model.generateContent({
-        contents: [
-          {
-            role: 'user',
-            parts: [
-              {
-                fileData: {
-                  mimeType: uploadResult.file.mimeType,
-                  fileUri: uploadResult.file.uri
-                }
-              },
-              { text: prompt }
-            ]
-          }
-        ],
-        generationConfig: {
-          responseMimeType: 'application/json'
-        }
-      });
-    });
-
-    if (!(await updateProgress(85))) return;
-
-    const textResponse = response.response.text();
-    console.log(`[Gemini] Response received:`, textResponse.slice(0, 200) + '...');
-
-    // Clean up file from Gemini Files API storage
     try {
-      await fileManager.deleteFile(uploadResult.file.name);
-      console.log(`[Gemini] Deleted file ${uploadResult.file.name} from Files API storage`);
-    } catch (cleanupError) {
-      console.error(`[Gemini] Warning: Failed to clean up file from Files API:`, cleanupError);
+      if (!(await updateProgress(30))) return;
+
+      // Wait for the uploaded file to be processed by Google Files API
+      let fileState = 'PROCESSING';
+      let attempts = 0;
+      while (fileState === 'PROCESSING' && attempts < 10) {
+        attempts++;
+        if (!(await updateProgress(Math.min(30 + attempts * 5, 55)))) return;
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        const fileInfo = await fileManager.getFile(uploadResult.file.name);
+        fileState = fileInfo.state;
+        console.log(`[Gemini] File state query attempt ${attempts}: ${fileState}`);
+      }
+      
+      if (fileState !== 'ACTIVE') {
+        throw new Error(`File upload processing failed. State: ${fileState}`);
+      }
+      if (!(await updateProgress(60))) return;
+
+      const durationInfoText = audioDuration > 0
+        ? `Durasi total audio ini adalah ${audioDuration} detik (${formatTime(audioDuration)}).\nPENTING: start_time dan end_time HARUS presisi dan berada di dalam rentang 0.0 hingga ${audioDuration}.0 detik. Waktu selesai (end_time) segmen terakhir TIDAK BOLEH melebihi ${audioDuration} detik.`
+        : '';
+
+      const prompt = `
+        Kamu adalah asisten transkripsi profesional. Dengarkan audio rekaman meeting ini dan buatlah transkrip lengkap.
+        Lakukan juga speaker diarization dengan mendeteksi siapa yang sedang berbicara secara konsisten sepanjang audio.
+        ${durationInfoText}
+        
+        Hasilkan output dalam format JSON array of objects. Setiap object wajib memiliki property berikut:
+        - speaker_label: string dengan format "Orang 1", "Orang 2", dst. untuk melabeli pembicara secara konsisten (orang yang sama harus mendapat label yang sama).
+        - start_time: number (waktu mulai berbicara dalam detik).
+        - end_time: number (waktu selesai berbicara dalam detik).
+        - text: string verbatim dari ucapan pembicara dalam bahasa aslinya (Indonesia/Inggris campur oke).
+        
+        PENTING: Balas HANYA dengan JSON array yang valid, tanpa penjelasan markdown prefix \`\`\`json atau suffix apa pun.
+      `;
+
+      // Execute content generation with retry and model fallback support
+      const response = await callGeminiWithRetry(async (modelName) => {
+        const genAI = new GoogleGenerativeAI(apiKey);
+        const model = genAI.getGenerativeModel({ model: modelName });
+        console.log(`[Gemini] Invoking model ${modelName} for audio diarization...`);
+        return await model.generateContent({
+          contents: [
+            {
+              role: 'user',
+              parts: [
+                {
+                  fileData: {
+                    mimeType: uploadResult.file.mimeType,
+                    fileUri: uploadResult.file.uri
+                  }
+                },
+                { text: prompt }
+              ]
+            }
+          ],
+          generationConfig: {
+            responseMimeType: 'application/json'
+          }
+        });
+      });
+
+      if (!(await updateProgress(85))) return;
+      textResponse = response.response.text();
+      console.log(`[Gemini] Response received:`, textResponse.slice(0, 200) + '...');
+    } finally {
+      // ALWAYS delete file from Gemini Files API storage immediately after generation attempt
+      try {
+        await fileManager.deleteFile(uploadResult.file.name);
+        console.log(`[Gemini Privacy Guard] Purged file ${uploadResult.file.name} from Files API cloud storage.`);
+      } catch (cleanupError) {
+        console.error(`[Gemini Privacy Guard] Warning: Failed to clean up file from Files API:`, cleanupError);
+      }
     }
 
     // Parse JSON

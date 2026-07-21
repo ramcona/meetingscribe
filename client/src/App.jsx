@@ -83,12 +83,10 @@ export default function App() {
           <div className="p-6 space-y-8">
             {/* Logo / Brand */}
             <div className="flex items-center gap-3 select-none">
-              <div className="h-9 w-9 bg-gradient-to-tr from-indigo-600 to-purple-600 rounded-xl flex items-center justify-center border border-indigo-500/20 shadow-lg shadow-indigo-600/10">
-                <Mic size={18} className="text-white" />
-              </div>
+              <img src="/icon.png" alt="Logo" className="h-10 w-10 rounded-2xl border border-white/10 shadow-md shadow-indigo-500/20 object-cover" />
               <div>
                 <div className="font-bold text-sm text-white tracking-wide">{appName}</div>
-                <div className="text-[10px] font-mono text-gray-500 uppercase tracking-widest font-semibold">Local-First</div>
+                <div className="text-[10px] font-mono text-indigo-400 uppercase tracking-widest font-semibold">Local-First</div>
               </div>
             </div>
 
@@ -132,10 +130,8 @@ export default function App() {
         <div className="flex-1 flex flex-col min-w-0">
           {/* Mobile Navigation Header */}
           <header className="md:hidden bg-[#111113] border-b border-white/5 px-6 py-4 flex items-center justify-between shrink-0">
-            <div className="flex items-center gap-2">
-              <div className="h-7 w-7 bg-gradient-to-tr from-indigo-600 to-purple-600 rounded-lg flex items-center justify-center">
-                <Mic size={14} className="text-white" />
-              </div>
+            <div className="flex items-center gap-2.5">
+              <img src="/icon.png" alt="Logo" className="h-8 w-8 rounded-xl border border-white/10 shadow-sm" />
               <span className="font-bold text-sm text-white">{appName}</span>
             </div>
 

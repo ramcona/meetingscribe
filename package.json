@@ -21,12 +21,17 @@
   "build": {
     "appId": "com.meetingscribe.app",
     "productName": "MeetingScribe",
+    "icon": "icon.png",
     "mac": {
       "category": "public.app-category.productivity",
+      "icon": "icon.png",
       "target": [
         "dmg",
         "zip"
       ]
+    },
+    "win": {
+      "icon": "icon.png"
     },
     "directories": {
       "output": "dist-desktop"
@@ -34,6 +39,7 @@
     "files": [
       "main.js",
       "preload.js",
+      "icon.png",
       "iconTemplate.png",
       "server/**/*",
       "client/dist/**/*"

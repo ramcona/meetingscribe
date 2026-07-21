@@ -444,4 +444,96 @@ router.post('/meetings/:id/cancel', (req, res) => {
   }
 });
 
+// Helper to calculate directory size in bytes
+function getFolderSizeBytes(dirPath) {
+  if (!fs.existsSync(dirPath)) return 0;
+  let totalSize = 0;
+  try {
+    const files = fs.readdirSync(dirPath);
+    for (const file of files) {
+      const filePath = path.join(dirPath, file);
+      const stats = fs.statSync(filePath);
+      if (stats.isFile()) {
+        totalSize += stats.size;
+      } else if (stats.isDirectory()) {
+        totalSize += getFolderSizeBytes(filePath);
+      }
+    }
+  } catch (e) {
+    // Ignore unreadable
+  }
+  return totalSize;
+}
+
+// 15. Get storage usage stats
+router.get('/storage', (req, res) => {
+  try {
+    const dbPath = path.join(__dirname, '../data/meetingscribe.db');
+    let dbSizeBytes = 0;
+    if (fs.existsSync(dbPath)) {
+      dbSizeBytes = fs.statSync(dbPath).size;
+    }
+
+    const recordingsSizeBytes = getFolderSizeBytes(recordingsDir);
+    let recordingsCount = 0;
+    if (fs.existsSync(recordingsDir)) {
+      recordingsCount = fs.readdirSync(recordingsDir).filter(f => !f.startsWith('.')).length;
+    }
+
+    const meetings = dbHelpers.listMeetings();
+    const totalMeetings = meetings.length;
+    const totalDurationSeconds = meetings.reduce((acc, m) => acc + (m.duration_seconds || 0), 0);
+
+    res.json({
+      db_size_bytes: dbSizeBytes,
+      recordings_size_bytes: recordingsSizeBytes,
+      total_storage_bytes: dbSizeBytes + recordingsSizeBytes,
+      recordings_count: recordingsCount,
+      meetings_count: totalMeetings,
+      total_duration_seconds: totalDurationSeconds
+    });
+  } catch (error) {
+    console.error('Error getting storage stats:', error);
+    res.status(500).json({ error: 'Failed to retrieve storage statistics' });
+  }
+});
+
+// 16. Cleanup orphaned recordings
+router.post('/storage/cleanup', (req, res) => {
+  try {
+    let deletedCount = 0;
+    let reclaimedBytes = 0;
+
+    if (fs.existsSync(recordingsDir)) {
+      const meetings = dbHelpers.listMeetings();
+      const validAudioPaths = new Set(meetings.map(m => m.audio_path).filter(Boolean));
+      const files = fs.readdirSync(recordingsDir);
+
+      for (const file of files) {
+        if (file.startsWith('.')) continue;
+        const filePath = path.join(recordingsDir, file);
+        if (!validAudioPaths.has(filePath)) {
+          try {
+            const stats = fs.statSync(filePath);
+            reclaimedBytes += stats.size;
+            fs.unlinkSync(filePath);
+            deletedCount++;
+          } catch (e) {
+            console.error('Error deleting orphan file:', e);
+          }
+        }
+      }
+    }
+
+    res.json({
+      message: `Cleaned up ${deletedCount} orphaned recording files`,
+      deleted_files_count: deletedCount,
+      reclaimed_bytes: reclaimedBytes
+    });
+  } catch (error) {
+    console.error('Error running storage cleanup:', error);
+    res.status(500).json({ error: 'Failed to run storage cleanup' });
+  }
+});
+
 export default router;

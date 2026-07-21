@@ -52,7 +52,7 @@ function startBackend() {
 app.setName('MeetingScribe');
 
 function createWindow() {
-  const iconPath = path.join(__dirname, 'iconTemplate.png');
+  const iconPath = path.join(__dirname, 'icon.png');
 
   mainWindow = new BrowserWindow({
     width: 1200,
