@@ -22,12 +22,186 @@ export function RecordingProvider({ children }) {
   const [micStreamPreview, setMicStreamPreview] = useState(null);
   const [systemStreamPreview, setSystemStreamPreview] = useState(null);
 
+  // Live Transcript (Beta) states
+  const [isLiveTranscriptEnabled, setIsLiveTranscriptEnabled] = useState(false);
+  const [liveEngine, setLiveEngine] = useState('whisper'); // 'whisper' (local ONNX) | 'webspeech' (browser API)
+  const [liveTranscriptLang, setLiveTranscriptLang] = useState('id-ID');
+  const [liveTranscriptSegments, setLiveTranscriptSegments] = useState([]);
+  const [interimText, setInterimText] = useState('');
+  const [liveTranscriptError, setLiveTranscriptError] = useState('');
+
   // Recording refs
   const recorderRef = useRef(null);
+  const recognitionRef = useRef(null);
+  const liveChunkRecorderRef = useRef(null);
   const activeStreamsRef = useRef({ mic: null, system: null, mixed: null });
   const audioContextRef = useRef(null);
   const timerRef = useRef(null);
   const chunksRef = useRef([]);
+
+  const isSpeechSupported = typeof window !== 'undefined' && ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window);
+
+  const shouldRestartRef = useRef(true);
+
+  // 1. Local Whisper Real-Time Chunk Streaming Effect (100% Offline Local Machine)
+  useEffect(() => {
+    if (!isRecording || isPaused || !isLiveTranscriptEnabled || liveEngine !== 'whisper') {
+      if (liveChunkRecorderRef.current && liveChunkRecorderRef.current.state !== 'inactive') {
+        try { liveChunkRecorderRef.current.stop(); } catch (e) {}
+      }
+      return;
+    }
+
+    const streams = activeStreamsRef.current;
+    const targetStream = streams.mixed || streams.mic;
+    if (!targetStream) return;
+
+    try {
+      const chunkRecorder = new MediaRecorder(targetStream, { mimeType: 'audio/webm' });
+      let chunkData = [];
+
+      chunkRecorder.ondataavailable = async (e) => {
+        if (e.data && e.data.size > 1000) {
+          chunkData.push(e.data);
+          const blob = new Blob(chunkData, { type: 'audio/webm' });
+          chunkData = [];
+
+          const formData = new FormData();
+          formData.append('audio_chunk', blob, 'chunk.webm');
+
+          try {
+            const res = await fetch('http://localhost:3001/api/live-whisper-chunk', {
+              method: 'POST',
+              body: formData
+            });
+
+            if (res.ok) {
+              const data = await res.json();
+              if (data.text && data.text.trim()) {
+                setLiveTranscriptSegments(prev => [
+                  ...prev,
+                  {
+                    id: Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+                    timestamp: duration,
+                    text: data.text.trim(),
+                    isFinal: true
+                  }
+                ]);
+              }
+            }
+          } catch (err) {
+            console.warn('[LiveWhisper] Chunk fetch error:', err);
+          }
+        }
+      };
+
+      chunkRecorder.start(4000);
+      liveChunkRecorderRef.current = chunkRecorder;
+      setLiveTranscriptError('');
+    } catch (err) {
+      console.error('[LiveWhisper] Failed to start live chunk recorder:', err);
+    }
+
+    return () => {
+      if (liveChunkRecorderRef.current && liveChunkRecorderRef.current.state !== 'inactive') {
+        try { liveChunkRecorderRef.current.stop(); } catch (e) {}
+      }
+    };
+  }, [isRecording, isPaused, isLiveTranscriptEnabled, liveEngine]);
+
+  // 2. Web Speech Recognition Effect (Fallback for browser mode)
+  useEffect(() => {
+    if (!isRecording || isPaused || !isLiveTranscriptEnabled || liveEngine !== 'webspeech') {
+      if (recognitionRef.current) {
+        try { recognitionRef.current.stop(); } catch (e) {}
+        recognitionRef.current = null;
+      }
+      setInterimText('');
+      return;
+    }
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      setLiveTranscriptError('Web Speech API live transcript tidak didukung di environment ini.');
+      return;
+    }
+
+    shouldRestartRef.current = true;
+    let recognition;
+    try {
+      recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = liveTranscriptLang;
+
+      recognition.onresult = (event) => {
+        let interim = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const transcript = event.results[i][0].transcript;
+          if (event.results[i].isFinal) {
+            if (transcript.trim()) {
+              setLiveTranscriptSegments(prev => [
+                ...prev,
+                {
+                  id: Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+                  timestamp: duration,
+                  text: transcript.trim(),
+                  isFinal: true
+                }
+              ]);
+            }
+          } else {
+            interim += transcript;
+          }
+        }
+        setInterimText(interim);
+      };
+
+      recognition.onerror = (err) => {
+        console.warn('[LiveTranscript] SpeechRecognition error:', err.error);
+        if (err.error === 'network') {
+          shouldRestartRef.current = false;
+          setLiveTranscriptError('Koneksi Web Speech Google tidak tersedia di Electron environment ini. Live transcript dapat dicatat sebagai draft.');
+        } else if (err.error === 'not-allowed') {
+          shouldRestartRef.current = false;
+          setLiveTranscriptError('Izin mikrofon untuk Live Speech Recognition ditolak.');
+        } else if (err.error === 'no-speech') {
+          // Normal timeout when quiet, allow restart
+        } else {
+          setLiveTranscriptError(`Live speech recognition: ${err.error}`);
+        }
+      };
+
+      recognition.onend = () => {
+        if (isRecording && !isPaused && isLiveTranscriptEnabled && recognitionRef.current && shouldRestartRef.current) {
+          setTimeout(() => {
+            if (isRecording && !isPaused && isLiveTranscriptEnabled && recognitionRef.current && shouldRestartRef.current) {
+              try {
+                recognition.start();
+              } catch (e) {}
+            }
+          }, 500);
+        }
+      };
+
+      recognition.start();
+      recognitionRef.current = recognition;
+      setLiveTranscriptError('');
+    } catch (err) {
+      console.error('[LiveTranscript] Failed to start SpeechRecognition:', err);
+      setLiveTranscriptError(err.message || 'Gagal memulai Live Speech Recognition.');
+    }
+
+    return () => {
+      shouldRestartRef.current = false;
+      if (recognitionRef.current) {
+        try { recognitionRef.current.stop(); } catch (e) {}
+        recognitionRef.current = null;
+      }
+      setInterimText('');
+    };
+  }, [isRecording, isPaused, isLiveTranscriptEnabled, liveTranscriptLang]);
+
 
   useEffect(() => {
     loadDevices();
@@ -167,6 +341,14 @@ export function RecordingProvider({ children }) {
     // Wait short tick for final data chunk
     await new Promise(res => setTimeout(res, 200));
 
+    if (!chunksRef.current || chunksRef.current.length === 0) {
+      console.warn('No audio chunks recorded.');
+      stopRecordingResources();
+      setUploading(false);
+      setErrorMessage('Tidak ada data audio terekam. Pastikan izin mikrofon telah diberikan.');
+      return;
+    }
+
     const audioBlob = new Blob(chunksRef.current, { type: 'audio/webm' });
     stopRecordingResources();
 
@@ -178,6 +360,19 @@ export function RecordingProvider({ children }) {
     formData.append('recording_started_at', startedAt);
 
     try {
+      // Save live transcript segments if captured
+      if (liveTranscriptSegments && liveTranscriptSegments.length > 0) {
+        try {
+          await fetch(`http://localhost:3001/api/meetings/${activeMeetingId}/live-transcript`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ segments: liveTranscriptSegments })
+          });
+        } catch (liveErr) {
+          console.error('Failed to save live transcript segments:', liveErr);
+        }
+      }
+
       const res = await fetch(`http://localhost:3001/api/meetings/${activeMeetingId}/recording`, {
         method: 'POST',
         body: formData
@@ -226,7 +421,18 @@ export function RecordingProvider({ children }) {
       stopAndSaveRecording,
       activeStreams: activeStreamsRef.current,
       stopPreviews,
-      loadDevices
+      loadDevices,
+      isLiveTranscriptEnabled,
+      setIsLiveTranscriptEnabled,
+      liveEngine,
+      setLiveEngine,
+      liveTranscriptLang,
+      setLiveTranscriptLang,
+      liveTranscriptSegments,
+      setLiveTranscriptSegments,
+      interimText,
+      liveTranscriptError,
+      isSpeechSupported
     }}>
       {children}
     </RecordingContext.Provider>

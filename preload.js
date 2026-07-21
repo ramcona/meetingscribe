@@ -11,5 +11,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => {
       ipcRenderer.removeListener('global-shortcut-record', subscription);
     };
-  }
+  },
+  // Activity Logs & System Diagnostics IPC methods
+  getActivityLogs: () => ipcRenderer.invoke('get-activity-logs'),
+  clearActivityLogs: () => ipcRenderer.invoke('clear-activity-logs'),
+  addClientLog: (level, source, message, details) => ipcRenderer.invoke('add-client-log', { level, source, message, details }),
+  toggleDevTools: () => ipcRenderer.invoke('toggle-devtools'),
+  getSystemStatus: () => ipcRenderer.invoke('get-system-status')
 });
+

@@ -5,7 +5,7 @@ import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const dataDir = path.join(__dirname, '../data');
+const dataDir = process.env.DATA_DIR || path.join(__dirname, '../data');
 
 // Ensure the data directory exists
 if (!fs.existsSync(dataDir)) {
@@ -15,8 +15,15 @@ if (!fs.existsSync(dataDir)) {
 const dbPath = process.env.NODE_ENV === 'test' ? ':memory:' : path.join(dataDir, 'meetingscribe.db');
 const db = new Database(dbPath);
 
-// Enable foreign keys
+// Enable foreign keys & WAL mode
 db.pragma('foreign_keys = ON');
+if (process.env.NODE_ENV !== 'test') {
+  try {
+    db.pragma('journal_mode = WAL');
+  } catch (err) {
+    // Ignore if WAL fails
+  }
+}
 
 // Initialize database schema
 export function initDb() {
@@ -73,6 +80,18 @@ export function initDb() {
       key TEXT PRIMARY KEY,
       value TEXT                        -- simpan Gemini API key, dll
     );
+
+    CREATE TABLE IF NOT EXISTS live_transcript_segments (
+      id TEXT PRIMARY KEY,
+      meeting_id TEXT NOT NULL,
+      speaker_label TEXT DEFAULT 'Live Speaker',
+      text TEXT NOT NULL,
+      start_time REAL,
+      end_time REAL,
+      segment_order INTEGER,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
+    );
   `);
 
   // Run dynamic schema migrations for existing databases
@@ -128,12 +147,14 @@ export const dbHelpers = {
     if (!meeting) return null;
 
     const segments = db.prepare('SELECT * FROM transcript_segments WHERE meeting_id = ? ORDER BY segment_order ASC').all(id);
+    const liveSegments = db.prepare('SELECT * FROM live_transcript_segments WHERE meeting_id = ? ORDER BY segment_order ASC').all(id);
     const summaries = db.prepare('SELECT * FROM summaries WHERE meeting_id = ? ORDER BY created_at DESC').all(id);
     const chapters = db.prepare('SELECT * FROM chapters WHERE meeting_id = ? ORDER BY chapter_order ASC').all(id);
 
     return {
       ...meeting,
       segments,
+      live_segments: liveSegments,
       summaries,
       chapters
     };
@@ -212,6 +233,37 @@ export const dbHelpers = {
     db.prepare('DELETE FROM transcript_segments WHERE meeting_id = ?').run(meetingId);
     db.prepare('DELETE FROM chapters WHERE meeting_id = ?').run(meetingId);
     db.prepare('DELETE FROM summaries WHERE meeting_id = ?').run(meetingId);
+  },
+
+  // Live Transcript helpers
+  addLiveTranscriptSegments(meetingId, segments) {
+    if (!segments || segments.length === 0) return;
+    const insert = db.prepare(`
+      INSERT INTO live_transcript_segments (id, meeting_id, speaker_label, text, start_time, end_time, segment_order)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const transaction = db.transaction((segs) => {
+      for (let idx = 0; idx < segs.length; idx++) {
+        const seg = segs[idx];
+        const id = crypto.randomUUID();
+        insert.run(
+          id,
+          meetingId,
+          seg.speaker_label || 'Live Speaker',
+          seg.text,
+          parseFloat(seg.start_time || seg.timestamp) || 0,
+          parseFloat(seg.end_time || seg.timestamp) || 0,
+          idx + 1
+        );
+      }
+    });
+
+    transaction(segments);
+  },
+
+  getLiveTranscriptSegments(meetingId) {
+    return db.prepare('SELECT * FROM live_transcript_segments WHERE meeting_id = ? ORDER BY segment_order ASC').all(meetingId);
   },
 
   // Summary helpers

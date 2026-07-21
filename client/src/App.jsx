@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Calendar, Settings as SettingsIcon, Mic, HelpCircle, Sparkles } from 'lucide-react';
+import logoImg from '../public/icon.png';
 import Dashboard from './pages/Dashboard';
 import Recording from './pages/Recording';
 import Detail from './pages/Detail';
@@ -83,7 +84,7 @@ export default function App() {
           <div className="p-6 space-y-8">
             {/* Logo / Brand */}
             <div className="flex items-center gap-3 select-none">
-              <img src="/icon.png" alt="Logo" className="h-10 w-10 rounded-2xl border border-white/10 shadow-md shadow-indigo-500/20 object-cover" />
+              <img src={logoImg} alt="Logo" className="h-10 w-10 rounded-2xl border border-white/10 shadow-md shadow-indigo-500/20 object-cover" />
               <div>
                 <div className="font-bold text-sm text-white tracking-wide">{appName}</div>
                 <div className="text-[10px] font-mono text-indigo-400 uppercase tracking-widest font-semibold">Local-First</div>

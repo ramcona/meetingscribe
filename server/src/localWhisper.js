@@ -5,6 +5,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { dbHelpers } from './db.js';
 import { getAudioDuration, normalizeAndRescaleSegments } from './audioUtils.js';
+import { isWhisperCppAvailable, transcribeWithWhisperCpp, transcribeLiveChunkWhisperCpp, findWhisperCppBinary } from './whisperCpp.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -14,10 +15,24 @@ env.allowLocalModels = true;
 
 let whisperPipelineInstance = null;
 
+function getFfmpegPath() {
+  const possiblePaths = [
+    '/opt/homebrew/bin/ffmpeg',
+    '/usr/local/bin/ffmpeg',
+    '/usr/bin/ffmpeg',
+    'ffmpeg'
+  ];
+  for (const p of possiblePaths) {
+    if (p !== 'ffmpeg' && fs.existsSync(p)) return p;
+  }
+  return 'ffmpeg';
+}
+
 // Convert audio file (WebM / MP3 / OGG) to 16kHz 16-bit mono WAV required by Whisper audio processor
 export function convertAudioToWav(inputPath, outputPath) {
   return new Promise((resolve, reject) => {
-    execFile('ffmpeg', [
+    const ffmpegCmd = getFfmpegPath();
+    execFile(ffmpegCmd, [
       '-y',
       '-i', inputPath,
       '-ar', '16000',
@@ -72,7 +87,7 @@ async function getWhisperPipeline(modelName = 'Xenova/whisper-tiny') {
 
 /**
  * Transcribes an audio file completely offline using local Whisper model.
- * Produces accurate start_time & end_time segments with 0% timestamp drift.
+ * Uses whisper.cpp (Metal GPU) if available, or ONNX Transformers.js as fallback.
  */
 export async function transcribeLocalAudio(meetingId, filePath) {
   const isTest = process.env.NODE_ENV === 'test';
@@ -97,6 +112,31 @@ export async function transcribeLocalAudio(meetingId, filePath) {
     dbHelpers.addTranscriptSegments(mockSegments);
     dbHelpers.updateMeeting(meetingId, { status: 'done', progress: 100 });
     return;
+  }
+
+  // Check if native whisper.cpp binary is available for Metal GPU acceleration
+  if (isWhisperCppAvailable()) {
+    console.log(`[WhisperCpp] Found native C++ binary at ${findWhisperCppBinary()}. Using Metal GPU acceleration...`);
+    try {
+      if (!(await updateProgress(20))) return;
+      const rawSegments = await transcribeWithWhisperCpp(filePath, { language: 'id' });
+      if (!(await updateProgress(85))) return;
+
+      const segments = rawSegments.map(s => ({
+        ...s,
+        meeting_id: meetingId
+      }));
+
+      const finalCheck = dbHelpers.getMeeting(meetingId);
+      if (!finalCheck || finalCheck.status !== 'transcribing') return;
+
+      dbHelpers.addTranscriptSegments(segments);
+      dbHelpers.updateMeeting(meetingId, { status: 'done', progress: 100 });
+      console.log(`[WhisperCpp] Successfully transcribed ${meetingId} via C++ Metal GPU (${segments.length} segments).`);
+      return;
+    } catch (cppErr) {
+      console.warn(`[WhisperCpp] Native execution failed, falling back to ONNX Transformers.js:`, cppErr.message);
+    }
   }
 
   const tempWavPath = path.join(path.dirname(filePath), `temp_${meetingId}_16k.wav`);
@@ -201,3 +241,57 @@ export async function transcribeLocalAudio(meetingId, filePath) {
     throw error;
   }
 }
+
+/**
+ * Transcribes a short live audio chunk (3-5 seconds) 100% locally using Whisper tiny model.
+ */
+export async function transcribeChunkLocalWhisper(audioBuffer) {
+  const isTest = process.env.NODE_ENV === 'test';
+  if (isTest) {
+    return 'Mock live chunk transcript text';
+  }
+
+  // Use C++ Metal GPU live chunk transcription if available
+  if (isWhisperCppAvailable()) {
+    try {
+      const cppText = await transcribeLiveChunkWhisperCpp(audioBuffer);
+      if (cppText && cppText.trim()) return cppText.trim();
+    } catch (e) {
+      console.warn('[WhisperCpp] Live chunk failed, falling back to ONNX:', e);
+    }
+  }
+
+  const dataDir = process.env.DATA_DIR || path.join(__dirname, '../data');
+  if (!fs.existsSync(dataDir)) {
+    fs.mkdirSync(dataDir, { recursive: true });
+  }
+
+  const id = Date.now() + Math.random().toString(36).substring(2, 6);
+  const tempChunkPath = path.join(dataDir, `temp_chunk_${id}.webm`);
+  const tempWavPath = path.join(dataDir, `temp_chunk_${id}.wav`);
+
+  try {
+    fs.writeFileSync(tempChunkPath, audioBuffer);
+    await convertAudioToWav(tempChunkPath, tempWavPath);
+    const audioData = readWavAudioToFloat32Array(tempWavPath);
+
+    const transcriber = await getWhisperPipeline('Xenova/whisper-tiny');
+    const output = await transcriber(audioData, {
+      chunk_length_s: 10,
+      return_timestamps: false
+    });
+
+    const text = (output.text || '').trim();
+
+    try { if (fs.existsSync(tempChunkPath)) fs.unlinkSync(tempChunkPath); } catch (e) {}
+    try { if (fs.existsSync(tempWavPath)) fs.unlinkSync(tempWavPath); } catch (e) {}
+
+    return text;
+  } catch (err) {
+    console.error('[LocalWhisper Chunk Error]:', err);
+    try { if (fs.existsSync(tempChunkPath)) fs.unlinkSync(tempChunkPath); } catch (e) {}
+    try { if (fs.existsSync(tempWavPath)) fs.unlinkSync(tempWavPath); } catch (e) {}
+    return '';
+  }
+}
+

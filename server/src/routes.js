@@ -7,10 +7,14 @@ import { dbHelpers } from './db.js';
 import { transcribeAudio, generateRecapOrMom, generateChapters } from './gemini.js';
 import { getAudioDuration } from './audioUtils.js';
 import { getUpcomingCalendarEvents, parseICalEvents } from './googleCalendar.js';
+import { transcribeChunkLocalWhisper } from './localWhisper.js';
+import { isWhisperCppAvailable, findWhisperCppBinary, getWhisperSetupStatus, runWhisperCppSetup } from './whisperCpp.js';
 
 const router = express.Router();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const recordingsDir = path.join(__dirname, '../data/recordings');
+const recordingsDir = process.env.DATA_DIR
+  ? path.join(process.env.DATA_DIR, 'recordings')
+  : path.join(__dirname, '../data/recordings');
 
 // Ensure recordings folder exists
 if (!fs.existsSync(recordingsDir)) {
@@ -20,7 +24,13 @@ if (!fs.existsSync(recordingsDir)) {
 // Multer disk storage setup
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, recordingsDir);
+    const targetDir = process.env.DATA_DIR
+      ? path.join(process.env.DATA_DIR, 'recordings')
+      : path.join(__dirname, '../data/recordings');
+    if (!fs.existsSync(targetDir)) {
+      fs.mkdirSync(targetDir, { recursive: true });
+    }
+    cb(null, targetDir);
   },
   filename: (req, file, cb) => {
     // Save file as [meetingId]-[timestamp].[ext]
@@ -95,6 +105,67 @@ router.patch('/meetings/:id', (req, res) => {
   } catch (error) {
     console.error('Error updating meeting:', error);
     res.status(500).json({ error: 'Failed to update meeting' });
+  }
+});
+
+// 4b. Save live transcript draft segments separately
+router.post('/meetings/:id/live-transcript', (req, res) => {
+  const meetingId = req.params.id;
+  const { segments } = req.body;
+  if (!segments || !Array.isArray(segments)) {
+    return res.status(400).json({ error: 'Segments array is required' });
+  }
+  try {
+    dbHelpers.addLiveTranscriptSegments(meetingId, segments);
+    res.json({ message: 'Live transcript segments saved successfully' });
+  } catch (error) {
+    console.error('Error saving live transcript segments:', error);
+    res.status(500).json({ error: 'Failed to save live transcript segments' });
+  }
+});
+
+// 4c. Real-time local Whisper: status, on-demand setup (SSE), and chunk transcription
+const memoryUpload = multer({ storage: multer.memoryStorage() });
+
+// GET /api/whisper-engine-status – binary + model readiness
+router.get('/whisper-engine-status', (req, res) => {
+  const status = getWhisperSetupStatus();
+  res.json(status);
+});
+
+// POST /api/whisper-setup – on-demand clone+compile+download, streams progress via SSE
+router.get('/whisper-setup', async (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  const send = (stage, pct, message) => {
+    const payload = JSON.stringify({ stage, pct, message });
+    res.write(`data: ${payload}\n\n`);
+  };
+
+  try {
+    await runWhisperCppSetup(send);
+    res.write(`data: ${JSON.stringify({ stage: 'done', pct: 100, message: 'whisper.cpp siap!' })}\n\n`);
+  } catch (err) {
+    res.write(`data: ${JSON.stringify({ stage: 'error', pct: 0, message: err.message })}\n\n`);
+  } finally {
+    res.end();
+  }
+});
+
+// POST /api/live-whisper-chunk – live real-time transcription
+router.post('/live-whisper-chunk', memoryUpload.single('audio_chunk'), async (req, res) => {
+  try {
+    if (!req.file || !req.file.buffer) {
+      return res.status(400).json({ error: 'No audio chunk provided' });
+    }
+    const text = await transcribeChunkLocalWhisper(req.file.buffer);
+    res.json({ text: text || '' });
+  } catch (error) {
+    console.error('Error processing live whisper chunk:', error);
+    res.status(500).json({ error: 'Failed to transcribe chunk' });
   }
 });
 
@@ -468,21 +539,36 @@ function getFolderSizeBytes(dirPath) {
 // 15. Get storage usage stats
 router.get('/storage', (req, res) => {
   try {
-    const dbPath = path.join(__dirname, '../data/meetingscribe.db');
+    const dataDir = process.env.DATA_DIR || path.join(__dirname, '../data');
+    const recDir = path.join(dataDir, 'recordings');
+    
+    // Sum main db file + WAL journal files
     let dbSizeBytes = 0;
-    if (fs.existsSync(dbPath)) {
-      dbSizeBytes = fs.statSync(dbPath).size;
+    const dbFiles = ['meetingscribe.db', 'meetingscribe.db-wal', 'meetingscribe.db-shm'];
+    for (const f of dbFiles) {
+      const p = path.join(dataDir, f);
+      if (fs.existsSync(p)) {
+        try {
+          dbSizeBytes += fs.statSync(p).size;
+        } catch (e) {}
+      }
     }
 
-    const recordingsSizeBytes = getFolderSizeBytes(recordingsDir);
+    const recordingsSizeBytes = getFolderSizeBytes(recDir);
     let recordingsCount = 0;
-    if (fs.existsSync(recordingsDir)) {
-      recordingsCount = fs.readdirSync(recordingsDir).filter(f => !f.startsWith('.')).length;
+    if (fs.existsSync(recDir)) {
+      try {
+        recordingsCount = fs.readdirSync(recDir).filter(f => !f.startsWith('.')).length;
+      } catch (e) {}
     }
 
-    const meetings = dbHelpers.listMeetings();
-    const totalMeetings = meetings.length;
-    const totalDurationSeconds = meetings.reduce((acc, m) => acc + (m.duration_seconds || 0), 0);
+    let totalMeetings = 0;
+    let totalDurationSeconds = 0;
+    try {
+      const meetings = dbHelpers.listMeetings();
+      totalMeetings = meetings.length;
+      totalDurationSeconds = meetings.reduce((acc, m) => acc + (m.duration_seconds || 0), 0);
+    } catch (e) {}
 
     res.json({
       db_size_bytes: dbSizeBytes,
@@ -494,7 +580,14 @@ router.get('/storage', (req, res) => {
     });
   } catch (error) {
     console.error('Error getting storage stats:', error);
-    res.status(500).json({ error: 'Failed to retrieve storage statistics' });
+    res.json({
+      db_size_bytes: 0,
+      recordings_size_bytes: 0,
+      total_storage_bytes: 0,
+      recordings_count: 0,
+      meetings_count: 0,
+      total_duration_seconds: 0
+    });
   }
 });
 
@@ -503,15 +596,17 @@ router.post('/storage/cleanup', (req, res) => {
   try {
     let deletedCount = 0;
     let reclaimedBytes = 0;
+    const dataDir = process.env.DATA_DIR || path.join(__dirname, '../data');
+    const recDir = path.join(dataDir, 'recordings');
 
-    if (fs.existsSync(recordingsDir)) {
+    if (fs.existsSync(recDir)) {
       const meetings = dbHelpers.listMeetings();
       const validAudioPaths = new Set(meetings.map(m => m.audio_path).filter(Boolean));
-      const files = fs.readdirSync(recordingsDir);
+      const files = fs.readdirSync(recDir);
 
       for (const file of files) {
         if (file.startsWith('.')) continue;
-        const filePath = path.join(recordingsDir, file);
+        const filePath = path.join(recDir, file);
         if (!validAudioPaths.has(filePath)) {
           try {
             const stats = fs.statSync(filePath);
@@ -536,4 +631,39 @@ router.post('/storage/cleanup', (req, res) => {
   }
 });
 
+// 17. System Activity Logs API
+import logger from './logger.js';
+
+router.get('/logs', (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 200;
+    const logs = logger.getLogs(limit);
+    res.json(logs);
+  } catch (error) {
+    console.error('Error fetching activity logs:', error);
+    res.status(500).json({ error: 'Failed to fetch activity logs' });
+  }
+});
+
+router.delete('/logs', (req, res) => {
+  try {
+    logger.clearLogs();
+    res.json({ message: 'Activity logs cleared' });
+  } catch (error) {
+    console.error('Error clearing activity logs:', error);
+    res.status(500).json({ error: 'Failed to clear activity logs' });
+  }
+});
+
+router.post('/logs', (req, res) => {
+  try {
+    const { level, source, message, details } = req.body;
+    const entry = logger.info(source || 'Client', message, details);
+    res.status(201).json(entry);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to record log' });
+  }
+});
+
 export default router;
+

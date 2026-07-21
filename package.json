@@ -18,13 +18,34 @@
     "electron-builder": "^26.15.3",
     "electron-is-dev": "^3.0.1"
   },
+  "dependencies": {
+    "@google/generative-ai": "^0.21.0",
+    "@xenova/transformers": "^2.17.2",
+    "better-sqlite3": "^11.3.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "multer": "^1.4.5-lts.1"
+  },
   "build": {
     "appId": "com.meetingscribe.app",
     "productName": "MeetingScribe",
     "icon": "icon.png",
+    "npmRebuild": true,
+    "asar": true,
+    "asarUnpack": [
+      "**/node_modules/better-sqlite3/**/*",
+      "**/node_modules/@xenova/**/*",
+      "**/*.node",
+      "server/**/*"
+    ],
     "mac": {
       "category": "public.app-category.productivity",
       "icon": "icon.png",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "MeetingScribe membutuhkan akses mikrofon untuk merekam audio meeting.",
+        "NSScreenCaptureUsageDescription": "MeetingScribe membutuhkan akses audio sistem untuk merekam suara meeting online."
+      },
       "target": [
         "dmg",
         "zip"

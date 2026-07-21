@@ -23,7 +23,13 @@ Object.defineProperty(globalThis, 'navigator', {
   writable: true
 });
 
-global.window = {};
+global.window = {
+  AudioContext: class {
+    createMediaStreamSource() { return { connect: () => {} }; }
+    createMediaStreamDestination() { return { stream: {} }; }
+    close() {}
+  }
+};
 global.MediaRecorder = class {
   constructor(stream, options) {
     this.stream = stream;

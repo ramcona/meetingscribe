@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Key, Shield, HelpCircle, ArrowRight, Settings as SettingsIcon, Mic, 
   CheckCircle2, AlertCircle, HardDrive, Database, FileAudio, Trash2, 
-  RefreshCw, Lock, ShieldCheck, Sparkles 
+  RefreshCw, Lock, ShieldCheck, Sparkles, Terminal, Download, Copy, 
+  Bug, Activity, Filter, Check, Search, Code, Server, Cpu
 } from 'lucide-react';
 
 export default function Settings() {
@@ -20,11 +21,125 @@ export default function Settings() {
   const [storageStats, setStorageStats] = useState(null);
   const [cleaningStorage, setCleaningStorage] = useState(false);
 
+  // Activity Logs & Diagnostics states
+  const [logs, setLogs] = useState([]);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [logFilter, setLogFilter] = useState('all'); // 'all' | 'error' | 'server' | 'client'
+  const [logSearch, setLogSearch] = useState('');
+  const [autoRefreshLogs, setAutoRefreshLogs] = useState(true);
+  const [copiedLog, setCopiedLog] = useState(false);
+  const [expandedLogId, setExpandedLogId] = useState(null);
+  const [systemStatus, setSystemStatus] = useState(null);
+
+  const logEndRef = useRef(null);
+
   useEffect(() => {
     fetchSettings();
     checkPermission();
     fetchStorageStats();
+    fetchSystemStatus();
+    fetchLogs();
   }, []);
+
+  useEffect(() => {
+    let interval;
+    if (autoRefreshLogs) {
+      interval = setInterval(() => {
+        fetchLogs(true);
+        fetchSystemStatus();
+      }, 3000);
+    }
+    return () => clearInterval(interval);
+  }, [autoRefreshLogs]);
+
+  const fetchSystemStatus = async () => {
+    if (window.electronAPI && window.electronAPI.getSystemStatus) {
+      try {
+        const status = await window.electronAPI.getSystemStatus();
+        setSystemStatus(status);
+      } catch (err) {
+        console.error('Error fetching IPC system status:', err);
+      }
+    }
+  };
+
+  const fetchLogs = async (silent = false) => {
+    if (!silent) setLogsLoading(true);
+    try {
+      let fetchedLogs = [];
+      // Try Electron IPC first
+      if (window.electronAPI && window.electronAPI.getActivityLogs) {
+        fetchedLogs = await window.electronAPI.getActivityLogs();
+      } else {
+        // Fallback to Express HTTP API
+        const res = await fetch('http://localhost:3001/api/logs');
+        if (res.ok) {
+          fetchedLogs = await res.json();
+        }
+      }
+      setLogs(fetchedLogs || []);
+    } catch (err) {
+      console.error('Error fetching logs:', err);
+    } finally {
+      if (!silent) setLogsLoading(false);
+    }
+  };
+
+  const handleClearLogs = async () => {
+    try {
+      if (window.electronAPI && window.electronAPI.clearActivityLogs) {
+        await window.electronAPI.clearActivityLogs();
+      } else {
+        await fetch('http://localhost:3001/api/logs', { method: 'DELETE' });
+      }
+      setLogs([]);
+    } catch (err) {
+      console.error('Error clearing logs:', err);
+    }
+  };
+
+  const handleToggleDevTools = async () => {
+    if (window.electronAPI && window.electronAPI.toggleDevTools) {
+      await window.electronAPI.toggleDevTools();
+    } else {
+      alert('Developer Tools IPC available only inside Electron App environment.');
+    }
+  };
+
+  const filteredLogs = logs.filter(log => {
+    if (logFilter === 'error' && log.level !== 'ERROR') return false;
+    if (logFilter === 'server' && !['Server', 'Main', 'Electron', 'DB'].includes(log.source)) return false;
+    if (logFilter === 'client' && log.source !== 'Client' && log.source !== 'Console') return false;
+    
+    if (logSearch.trim()) {
+      const q = logSearch.toLowerCase();
+      const matchMsg = log.message && log.message.toLowerCase().includes(q);
+      const matchSource = log.source && log.source.toLowerCase().includes(q);
+      const matchDetails = log.details && log.details.toLowerCase().includes(q);
+      return matchMsg || matchSource || matchDetails;
+    }
+    return true;
+  });
+
+  const handleCopyLogs = () => {
+    const text = filteredLogs.map(l => `[${l.timestamp}] [${l.level}] [${l.source}] ${l.message}${l.details ? '\nDetails: ' + l.details : ''}`).join('\n');
+    navigator.clipboard.writeText(text);
+    setCopiedLog(true);
+    setTimeout(() => setCopiedLog(false), 2000);
+  };
+
+  const handleExportLogs = () => {
+    const text = filteredLogs.map(l => `[${l.timestamp}] [${l.level}] [${l.source}] ${l.message}${l.details ? '\nDetails: ' + l.details : ''}`).join('\n');
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `meetingscribe-activity-logs-${new Date().toISOString().slice(0, 10)}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
 
   const fetchSettings = async () => {
     try {
@@ -50,9 +165,26 @@ export default function Settings() {
       if (res.ok) {
         const data = await res.json();
         setStorageStats(data);
+      } else {
+        setStorageStats({
+          db_size_bytes: 0,
+          recordings_size_bytes: 0,
+          total_storage_bytes: 0,
+          recordings_count: 0,
+          meetings_count: 0,
+          total_duration_seconds: 0
+        });
       }
     } catch (err) {
       console.error('Error fetching storage stats:', err);
+      setStorageStats({
+        db_size_bytes: 0,
+        recordings_size_bytes: 0,
+        total_storage_bytes: 0,
+        recordings_count: 0,
+        meetings_count: 0,
+        total_duration_seconds: 0
+      });
     }
   };
 
@@ -94,7 +226,6 @@ export default function Settings() {
   const handleRequestPermission = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      // Stop track immediately to release mic
       stream.getTracks().forEach(track => track.stop());
       setPermissionStatus('granted');
     } catch (err) {
@@ -158,16 +289,38 @@ export default function Settings() {
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8 animate-fade-in pb-10">
+    <div className="max-w-4xl mx-auto space-y-8 animate-fade-in pb-16">
       <div className="flex items-center gap-3">
         <div className="p-3 bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 rounded-xl shadow-lg shadow-indigo-500/10">
           <SettingsIcon size={24} />
         </div>
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-white">Settings & Privacy</h1>
-          <p className="text-sm text-gray-400">Manage transcription engine, data privacy guardrails, API keys, and storage</p>
+          <h1 className="text-2xl font-bold tracking-tight text-white">Settings & System Diagnostics</h1>
+          <p className="text-sm text-gray-400">Manage transcription engine, view live activity logs, API keys, and system stats</p>
         </div>
       </div>
+
+      {/* Backend Error / Warning Banner */}
+      {systemStatus && systemStatus.backendError && (
+        <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-5 space-y-3 shadow-xl">
+          <div className="flex items-center gap-3 text-red-400 font-semibold text-sm">
+            <AlertCircle size={20} className="shrink-0" />
+            <span>Backend Server Diagnostic Alert: Failed to Start Native Express Backend</span>
+          </div>
+          <div className="text-xs text-gray-300 font-mono bg-black/50 p-3 rounded-xl border border-red-500/20 whitespace-pre-wrap max-h-36 overflow-y-auto">
+            {systemStatus.backendError}
+          </div>
+          <div className="flex items-center justify-between text-xs text-gray-400 pt-1">
+            <span>Gunakan tombol <strong>Developer Tools</strong> di bawah untuk membaca console error lengkap.</span>
+            <button
+              onClick={handleToggleDevTools}
+              className="px-3 py-1.5 bg-red-500/20 hover:bg-red-500/30 text-red-300 font-medium rounded-lg transition border border-red-500/30 cursor-pointer"
+            >
+              Open DevTools
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* API & Engine Settings Box */}
@@ -470,6 +623,245 @@ export default function Settings() {
               )}
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* NEW: Full Activity Log & System Diagnostics Section */}
+      <div className="bg-[#111113] border border-white/5 rounded-2xl p-6 space-y-6 shadow-xl">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/5 pb-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-xl">
+              <Terminal size={20} />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                System Activity Log & Diagnostics
+                <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 text-[10px] font-mono rounded-full border border-emerald-500/20">
+                  Live
+                </span>
+              </h2>
+              <p className="text-xs text-gray-400">
+                Log aktivitas real-time aplikasi, backend process, database, dan IPC events untuk diagnosa rilis build
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={handleToggleDevTools}
+              className="flex items-center gap-1.5 px-3 py-2 bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-400 border border-indigo-500/20 rounded-xl text-xs font-medium transition cursor-pointer"
+              title="Open Electron Developer Tools"
+            >
+              <Code size={14} />
+              DevTools
+            </button>
+            <button
+              onClick={handleExportLogs}
+              className="flex items-center gap-1.5 px-3 py-2 bg-white/5 hover:bg-white/10 text-gray-300 border border-white/5 rounded-xl text-xs font-medium transition cursor-pointer"
+              title="Export Log File"
+            >
+              <Download size={14} />
+              Export
+            </button>
+            <button
+              onClick={handleCopyLogs}
+              className="flex items-center gap-1.5 px-3 py-2 bg-white/5 hover:bg-white/10 text-gray-300 border border-white/5 rounded-xl text-xs font-medium transition cursor-pointer"
+              title="Copy All Logs"
+            >
+              {copiedLog ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
+              {copiedLog ? 'Copied!' : 'Copy'}
+            </button>
+            <button
+              onClick={handleClearLogs}
+              className="p-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 rounded-xl transition cursor-pointer"
+              title="Clear Logs"
+            >
+              <Trash2 size={14} />
+            </button>
+          </div>
+        </div>
+
+        {/* System Diagnostics Specs Bar */}
+        {systemStatus && (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs font-mono">
+            <div className="p-3 bg-black/30 border border-white/5 rounded-xl flex items-center gap-2.5">
+              <Server size={16} className={systemStatus.backendError ? "text-red-400" : "text-emerald-400"} />
+              <div>
+                <div className="text-[10px] text-gray-500">Backend Status</div>
+                <div className={systemStatus.backendError ? "text-red-400 font-semibold" : "text-emerald-400 font-semibold"}>
+                  {systemStatus.backendError ? 'Error Startup' : 'Running (3001)'}
+                </div>
+              </div>
+            </div>
+
+            <div className="p-3 bg-black/30 border border-white/5 rounded-xl flex items-center gap-2.5">
+              <Cpu size={16} className="text-indigo-400" />
+              <div>
+                <div className="text-[10px] text-gray-500">Electron / Node</div>
+                <div className="text-white font-semibold">
+                  v{systemStatus.electronVersion || 'N/A'} / {systemStatus.nodeVersion}
+                </div>
+              </div>
+            </div>
+
+            <div className="p-3 bg-black/30 border border-white/5 rounded-xl flex items-center gap-2.5">
+              <Activity size={16} className="text-cyan-400" />
+              <div>
+                <div className="text-[10px] text-gray-500">Environment</div>
+                <div className="text-white font-semibold">
+                  {systemStatus.isDev ? 'Development' : 'Production Build'}
+                </div>
+              </div>
+            </div>
+
+            <div className="p-3 bg-black/30 border border-white/5 rounded-xl flex items-center gap-2.5 truncate">
+              <HardDrive size={16} className="text-amber-400 shrink-0" />
+              <div className="min-w-0 truncate">
+                <div className="text-[10px] text-gray-500">User Data Dir</div>
+                <div className="text-gray-300 font-semibold truncate text-[10px]" title={systemStatus.userDataPath}>
+                  {systemStatus.userDataPath}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Filter and Search Bar */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-black/30 p-3 border border-white/5 rounded-xl">
+          {/* Filter Tabs */}
+          <div className="flex items-center gap-1.5 overflow-x-auto">
+            <button
+              onClick={() => setLogFilter('all')}
+              className={`px-3 py-1.5 text-xs font-medium rounded-lg transition cursor-pointer ${
+                logFilter === 'all' ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              Semua ({logs.length})
+            </button>
+            <button
+              onClick={() => setLogFilter('error')}
+              className={`px-3 py-1.5 text-xs font-medium rounded-lg transition cursor-pointer ${
+                logFilter === 'error' ? 'bg-red-600 text-white' : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              Errors ({logs.filter(l => l.level === 'ERROR').length})
+            </button>
+            <button
+              onClick={() => setLogFilter('server')}
+              className={`px-3 py-1.5 text-xs font-medium rounded-lg transition cursor-pointer ${
+                logFilter === 'server' ? 'bg-cyan-600 text-white' : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              Server/Main
+            </button>
+            <button
+              onClick={() => setLogFilter('client')}
+              className={`px-3 py-1.5 text-xs font-medium rounded-lg transition cursor-pointer ${
+                logFilter === 'client' ? 'bg-purple-600 text-white' : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              Frontend
+            </button>
+          </div>
+
+          <div className="flex items-center gap-3">
+            {/* Search Box */}
+            <div className="relative flex-1 sm:w-60">
+              <Search size={14} className="absolute left-3 top-2.5 text-gray-500" />
+              <input
+                type="text"
+                value={logSearch}
+                onChange={(e) => setLogSearch(e.target.value)}
+                placeholder="Cari kata kunci log..."
+                className="w-full bg-black/50 border border-white/10 rounded-lg pl-8 pr-3 py-1.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500"
+              />
+            </div>
+
+            {/* Auto Refresh Switch */}
+            <label className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer select-none shrink-0">
+              <input
+                type="checkbox"
+                checked={autoRefreshLogs}
+                onChange={(e) => setAutoRefreshLogs(e.target.checked)}
+                className="rounded border-white/10 bg-black/40 text-indigo-600 focus:ring-0"
+              />
+              <span>Live Auto-Sync</span>
+            </label>
+
+            <button
+              onClick={() => fetchLogs()}
+              className="p-1.5 hover:bg-white/5 text-gray-400 hover:text-white rounded-lg transition cursor-pointer"
+              title="Manual Refresh Logs"
+            >
+              <RefreshCw size={14} className={logsLoading ? 'animate-spin' : ''} />
+            </button>
+          </div>
+        </div>
+
+        {/* Monospace Console Output Stream */}
+        <div className="bg-[#070709] border border-white/10 rounded-xl p-4 font-mono text-xs max-h-96 overflow-y-auto space-y-2 select-text">
+          {filteredLogs.length === 0 ? (
+            <div className="text-center py-10 text-gray-600 italic">
+              {logSearch ? 'Tidak ada log yang cocok dengan pencarian' : 'Belum ada catatan activity log terdaftar'}
+            </div>
+          ) : (
+            filteredLogs.map((log) => {
+              const levelColor = 
+                log.level === 'ERROR' ? 'bg-red-500/10 text-red-400 border-red-500/30' :
+                log.level === 'WARN' ? 'bg-amber-500/10 text-amber-400 border-amber-500/30' :
+                log.level === 'SUCCESS' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' :
+                'bg-cyan-500/10 text-cyan-400 border-cyan-500/30';
+
+              const sourceColor = 
+                log.source === 'Server' ? 'text-indigo-400' :
+                log.source === 'Electron' ? 'text-purple-400' :
+                log.source === 'DB' ? 'text-cyan-400' :
+                log.source === 'Whisper' ? 'text-emerald-400' :
+                log.source === 'Gemini' ? 'text-amber-400' :
+                'text-gray-400';
+
+              return (
+                <div 
+                  key={log.id} 
+                  className="p-2 hover:bg-white/[0.02] rounded-lg transition border border-transparent hover:border-white/5"
+                >
+                  <div className="flex items-start gap-2 flex-wrap">
+                    <span className="text-gray-600 text-[10px] shrink-0">
+                      {log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : ''}
+                    </span>
+
+                    <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold border uppercase ${levelColor}`}>
+                      {log.level}
+                    </span>
+
+                    <span className={`font-semibold text-[11px] ${sourceColor}`}>
+                      [{log.source}]
+                    </span>
+
+                    <span className="text-gray-200 flex-1 break-all leading-relaxed">
+                      {log.message}
+                    </span>
+
+                    {log.details && (
+                      <button
+                        onClick={() => setExpandedLogId(expandedLogId === log.id ? null : log.id)}
+                        className="text-[10px] text-indigo-400 hover:underline shrink-0 ml-auto"
+                      >
+                        {expandedLogId === log.id ? 'Sembunyikan Details' : 'Lihat Stack/Details'}
+                      </button>
+                    )}
+                  </div>
+
+                  {log.details && expandedLogId === log.id && (
+                    <div className="mt-2 p-3 bg-black/60 rounded-lg text-[10px] text-gray-300 font-mono whitespace-pre-wrap border border-white/5 overflow-x-auto">
+                      {log.details}
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          )}
+          <div ref={logEndRef} />
         </div>
       </div>
     </div>

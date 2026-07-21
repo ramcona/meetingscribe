@@ -35,6 +35,7 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
   const [notes, setNotes] = useState('');
   const [notesSavedState, setNotesSavedState] = useState('idle'); // 'idle' | 'saving' | 'saved' | 'error'
   const [summaryLanguage, setSummaryLanguage] = useState('id'); // 'id' | 'en' | 'bilingual'
+  const [transcriptSubTab, setTranscriptSubTab] = useState('ai'); // 'ai' | 'live'
   const saveTimeoutRef = useRef(null);
 
   // Speakers list states
@@ -613,10 +614,33 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
 
           {/* Transcript Card */}
           <div className="bg-[#111113] border border-white/5 rounded-3xl overflow-hidden min-h-[500px] flex flex-col">
-            <div className="border-b border-white/5 p-4 flex items-center justify-between bg-[#151517]">
-              <div className="flex items-center gap-2">
-                <FileText size={16} className="text-gray-400" />
-                <h2 className="text-sm font-semibold text-white">Transcript</h2>
+            <div className="border-b border-white/5 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[#151517]">
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2">
+                  <FileText size={16} className="text-gray-400" />
+                  <h2 className="text-sm font-semibold text-white">Transcript</h2>
+                </div>
+
+                {/* Sub-Tab Switcher: AI Transcript vs Live Draft Transcript */}
+                <div className="flex items-center bg-black/40 border border-white/10 p-0.5 rounded-xl text-xs">
+                  <button
+                    onClick={() => setTranscriptSubTab('ai')}
+                    className={`px-3 py-1 font-medium rounded-lg transition cursor-pointer ${
+                      transcriptSubTab === 'ai' ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-white'
+                    }`}
+                  >
+                    AI Presisi ({meeting.segments?.length || 0})
+                  </button>
+                  <button
+                    onClick={() => setTranscriptSubTab('live')}
+                    className={`px-3 py-1 font-medium rounded-lg transition cursor-pointer flex items-center gap-1.5 ${
+                      transcriptSubTab === 'live' ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-white'
+                    }`}
+                  >
+                    <span>Draft Live ({meeting.live_segments?.length || 0})</span>
+                    <span className="px-1.5 py-0.2 bg-indigo-500/30 text-indigo-200 text-[9px] rounded-full font-mono">BETA</span>
+                  </button>
+                </div>
               </div>
               
               {meeting.status === 'transcribing' ? (
@@ -628,7 +652,7 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
                 meeting.audio_path && (
                   <button
                     onClick={() => setShowEngineModal(true)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600/15 hover:bg-indigo-600/25 border border-indigo-500/25 text-indigo-300 hover:text-white text-xs font-semibold transition cursor-pointer"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600/15 hover:bg-indigo-600/25 border border-indigo-500/25 text-indigo-300 hover:text-white text-xs font-semibold transition cursor-pointer shrink-0"
                     title="Transkrip Ulang / Ganti Engine Transkripsi"
                   >
                     <RefreshCw size={12} />
@@ -695,12 +719,49 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
                     {reanalyzing ? 'Memulai Transkripsi...' : 'Transkrip Ulang'}
                   </button>
                 </div>
+              ) : transcriptSubTab === 'live' ? (
+                (!meeting.live_segments || meeting.live_segments.length === 0) ? (
+                  <div className="h-64 flex flex-col items-center justify-center text-center p-6 space-y-3">
+                    <div className="p-3 bg-white/5 border border-white/5 text-indigo-400 rounded-2xl">
+                      <FileText size={24} />
+                    </div>
+                    <div className="space-y-1">
+                      <h4 className="text-xs font-semibold text-white">Belum Ada Draft Transkrip Live</h4>
+                      <p className="text-[11px] text-gray-500 max-w-xs leading-relaxed">
+                        Draft transkrip live real-time (Beta) ditangkap saat saklar Live Transcript diaktifkan sewaktu perekaman.
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-3 font-sans text-xs">
+                    <div className="p-3 bg-indigo-950/20 border border-indigo-500/20 rounded-xl text-[11px] text-indigo-300 flex items-center justify-between">
+                      <span>Draft Transkrip Real-Time (Disimpan terpisah dari Transkrip AI Presisi)</span>
+                      <span className="font-mono text-[10px] text-indigo-400 font-bold">{meeting.live_segments.length} Frasa</span>
+                    </div>
+
+                    {meeting.live_segments.map((seg, idx) => (
+                      <div 
+                        key={seg.id || idx}
+                        onClick={() => handleSegmentClick(seg.start_time || 0)}
+                        className="p-3 bg-black/30 border border-white/5 hover:border-white/10 rounded-xl space-y-1 cursor-pointer transition"
+                      >
+                        <div className="flex items-center gap-2 text-[10px] font-mono">
+                          <span className="text-indigo-400 font-bold">[{seg.speaker_label || 'Live Speaker'}]</span>
+                          <span className="text-gray-500">[{formatDuration(seg.start_time || 0)}]</span>
+                        </div>
+                        <p className="text-gray-200 leading-relaxed font-sans text-xs">
+                          {seg.text}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )
               ) : (!meeting.segments || meeting.segments.length === 0) ? (
                 meeting.audio_path ? (
                   <div className="h-64 flex flex-col items-center justify-center text-center p-6 space-y-4">
                     <FileText size={28} className="text-indigo-400" />
                     <div className="space-y-1.5">
-                      <h4 className="text-xs font-semibold text-white">Belum Ada Transkrip</h4>
+                      <h4 className="text-xs font-semibold text-white">Belum Ada Transkrip AI Presisi</h4>
                       <p className="text-[11px] text-gray-500 leading-relaxed max-w-xs">
                         File rekaman audio sudah tersimpan. Klik tombol di bawah untuk memulai transkripsi otomatis.
                       </p>

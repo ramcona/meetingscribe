@@ -1,7 +1,7 @@
-const { app, BrowserWindow, globalShortcut, Tray, Menu } = require('electron');
+const { app, BrowserWindow, globalShortcut, Tray, Menu, session, systemPreferences, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const { spawn } = require('child_process');
+const { pathToFileURL } = require('url');
 
 // Load environment variables in Electron main process from server/.env if available
 const envPath = path.join(__dirname, 'server/.env');
@@ -14,39 +14,108 @@ if (fs.existsSync(envPath)) {
 }
 
 let mainWindow;
-let backendProcess = null;
 let tray = null;
+let loggerModule = null;
+let backendStarted = false;
+let backendError = null;
 
 // Determine if we are in development mode
 const isDev = process.env.NODE_ENV === 'development' || process.env.ELECTRON_DEV === 'true';
 
 // Start the Express backend if we are in production
-function startBackend() {
+async function startBackend() {
+  const userDataPath = app.getPath('userData');
+  const dataDir = path.join(userDataPath, 'data');
+  if (!fs.existsSync(dataDir)) {
+    fs.mkdirSync(dataDir, { recursive: true });
+  }
+  process.env.DATA_DIR = dataDir;
+
+  // Dynamically load logger module
+  try {
+    let loggerPath = path.join(__dirname, 'server/src/logger.js');
+    if (loggerPath.includes('app.asar') && !fs.existsSync(loggerPath)) {
+      const unpackedLogger = loggerPath.replace('app.asar', 'app.asar.unpacked');
+      if (fs.existsSync(unpackedLogger)) loggerPath = unpackedLogger;
+    }
+    loggerModule = await import(pathToFileURL(loggerPath).href);
+    if (loggerModule && loggerModule.initLogger) {
+      loggerModule.initLogger(dataDir);
+      loggerModule.addLog('INFO', 'Electron', `MeetingScribe starting... (isDev=${isDev})`);
+      loggerModule.addLog('INFO', 'System', `OS: ${process.platform} ${process.arch}, Node: ${process.versions.node}, Electron: ${process.versions.electron}`);
+    }
+  } catch (err) {
+    console.error('[Electron] Failed to load logger in main process:', err);
+  }
+
   if (isDev) {
-    console.log('[Electron] Running in development mode. Skipping native backend spawning...');
+    console.log('[Electron] Running in development mode. Skipping native backend startup...');
+    backendStarted = true;
     return;
   }
 
-  console.log('[Electron] Starting Express Backend natively...');
-  const serverPath = path.join(__dirname, 'server/src/index.js');
-  
-  backendProcess = spawn('node', [serverPath], {
-    cwd: path.join(__dirname, 'server'),
-    env: { ...process.env, NODE_ENV: 'production' }
-  });
-
-  backendProcess.stdout.on('data', (data) => {
-    console.log(`[Backend stdout]: ${data.toString().trim()}`);
-  });
-
-  backendProcess.stderr.on('data', (data) => {
-    console.error(`[Backend stderr]: ${data.toString().trim()}`);
-  });
-
-  backendProcess.on('close', (code) => {
-    console.log(`[Backend] Process exited with code ${code}`);
-  });
+  console.log('[Electron] Starting Express Backend in main process...');
+  try {
+    let serverPath = path.join(__dirname, 'server/src/index.js');
+    if (serverPath.includes('app.asar') && !fs.existsSync(serverPath)) {
+      const unpackedServer = serverPath.replace('app.asar', 'app.asar.unpacked');
+      if (fs.existsSync(unpackedServer)) serverPath = unpackedServer;
+    }
+    await import(pathToFileURL(serverPath).href);
+    backendStarted = true;
+    console.log('[Electron] Express Backend started successfully');
+    if (loggerModule) loggerModule.addLog('SUCCESS', 'Server', 'Express Backend started successfully on port 3001');
+  } catch (err) {
+    backendError = err.stack || err.message || String(err);
+    console.error('[Electron] Failed to start Express Backend:', err);
+    if (loggerModule) loggerModule.addLog('ERROR', 'Server', `Failed to start Express Backend: ${backendError}`);
+  }
 }
+
+// IPC Handlers for Activity Logs and System Diagnostics
+ipcMain.handle('get-activity-logs', async () => {
+  if (loggerModule && loggerModule.logger) {
+    return loggerModule.logger.getLogs();
+  }
+  return [];
+});
+
+ipcMain.handle('clear-activity-logs', async () => {
+  if (loggerModule && loggerModule.logger) {
+    loggerModule.logger.clearLogs();
+  }
+  return true;
+});
+
+ipcMain.handle('add-client-log', async (_event, { level, source, message, details }) => {
+  if (loggerModule && loggerModule.addLog) {
+    loggerModule.addLog(level, source || 'Client', message, details);
+  }
+  return true;
+});
+
+ipcMain.handle('toggle-devtools', async () => {
+  if (mainWindow && mainWindow.webContents) {
+    mainWindow.webContents.toggleDevTools();
+    return true;
+  }
+  return false;
+});
+
+ipcMain.handle('get-system-status', async () => {
+  return {
+    backendStarted,
+    backendError,
+    version: app.getVersion ? app.getVersion() : '1.0.0',
+    electronVersion: process.versions.electron,
+    nodeVersion: process.versions.node,
+    platform: process.platform,
+    arch: process.arch,
+    userDataPath: app.getPath('userData'),
+    isDev
+  };
+});
+
 
 // Set application name for desktop OS integrations
 app.setName('MeetingScribe');
@@ -149,8 +218,30 @@ function createTray() {
 }
 
 // Boot setup
-app.whenReady().then(() => {
-  startBackend();
+app.whenReady().then(async () => {
+  if (session && session.defaultSession) {
+    session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
+      callback(true);
+    });
+  }
+
+  // Request macOS system microphone access on initial app launch
+  if (process.platform === 'darwin' && systemPreferences && systemPreferences.askForMediaAccess) {
+    try {
+      const micStatus = systemPreferences.getMediaAccessStatus('microphone');
+      if (micStatus !== 'granted') {
+        systemPreferences.askForMediaAccess('microphone').then(granted => {
+          console.log('[Electron] macOS Microphone access requested on launch:', granted);
+        }).catch(err => {
+          console.error('[Electron] Error requesting macOS microphone access:', err);
+        });
+      }
+    } catch (err) {
+      console.error('[Electron] Failed to check macOS media access:', err);
+    }
+  }
+
+  await startBackend();
   createWindow();
   createTray();
 
@@ -180,8 +271,4 @@ app.on('window-all-closed', () => {
 // Clean up background subprocesses on quit
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
-  if (backendProcess) {
-    console.log('[Electron] Killing background Express Backend process...');
-    backendProcess.kill();
-  }
 });

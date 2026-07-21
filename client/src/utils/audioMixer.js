@@ -6,8 +6,10 @@
 // Enumerate input audio devices
 export async function getAudioInputDevices() {
   try {
-    // Request permission first to get labels
-    await navigator.mediaDevices.getUserMedia({ audio: true });
+    // Request permission first to get labels, then release temporary stream
+    const tempStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    tempStream.getTracks().forEach(track => track.stop());
+
     const devices = await navigator.mediaDevices.enumerateDevices();
     return devices.filter(device => device.kind === 'audioinput');
   } catch (error) {
@@ -25,39 +27,45 @@ export async function startAudioRecording({ micDeviceId, systemDeviceId, useTabC
   let recorder = null;
 
   try {
-    // 1. Capture Microphone (if selected, or if no other source is selected as fallback)
+    // 1. Capture Microphone (if requested or if no system source is selected)
     if (micDeviceId || (!systemDeviceId && !useTabCapture)) {
-      const micConstraints = {
-        audio: micDeviceId ? { deviceId: { exact: micDeviceId } } : true
-      };
-      micStream = await navigator.mediaDevices.getUserMedia(micConstraints);
+      try {
+        const micConstraints = {
+          audio: (micDeviceId && micDeviceId !== 'default') ? { deviceId: { ideal: micDeviceId } } : true
+        };
+        micStream = await navigator.mediaDevices.getUserMedia(micConstraints);
+      } catch (micErr) {
+        console.warn('Microphone stream error with specified ID, falling back to default mic:', micErr);
+        micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      }
     }
 
     // 2. Capture System/Participant Audio
     if (useTabCapture) {
-      // Capture Chrome Tab audio (forces display media prompt)
-      const displayStream = await navigator.mediaDevices.getDisplayMedia({
-        video: true, // required by browser spec, we will drop it
-        audio: true
-      });
-      
-      // Filter out video track immediately
-      const videoTracks = displayStream.getVideoTracks();
-      videoTracks.forEach(track => track.stop());
-
-      const audioTracks = displayStream.getAudioTracks();
-      if (audioTracks.length === 0) {
-        throw new Error('No audio track shared in tab capture.');
+      try {
+        const displayStream = await navigator.mediaDevices.getDisplayMedia({
+          video: true,
+          audio: true
+        });
+        displayStream.getVideoTracks().forEach(track => track.stop());
+        const audioTracks = displayStream.getAudioTracks();
+        if (audioTracks.length > 0) {
+          systemStream = new MediaStream(audioTracks);
+        }
+      } catch (tabErr) {
+        console.warn('Tab capture cancelled or unavailable:', tabErr);
       }
-      systemStream = new MediaStream(audioTracks);
-    } else if (systemDeviceId) {
-      // Capture secondary device like BlackHole
-      systemStream = await navigator.mediaDevices.getUserMedia({
-        audio: { deviceId: { exact: systemDeviceId } }
-      });
+    } else if (systemDeviceId && systemDeviceId !== 'default' && systemDeviceId !== micDeviceId) {
+      try {
+        systemStream = await navigator.mediaDevices.getUserMedia({
+          audio: { deviceId: { ideal: systemDeviceId } }
+        });
+      } catch (sysErr) {
+        console.warn('System device capture failed, continuing with microphone:', sysErr);
+      }
     }
 
-    // 3. Mix streams if we have both, or select the active single stream
+    // 3. Mix streams if we have both, or select active single stream
     if (micStream && systemStream) {
       audioContext = new (window.AudioContext || window.webkitAudioContext)();
       
@@ -65,21 +73,19 @@ export async function startAudioRecording({ micDeviceId, systemDeviceId, useTabC
       const systemSource = audioContext.createMediaStreamSource(systemStream);
       const destination = audioContext.createMediaStreamDestination();
 
-      // Connect both inputs to the destination (automatic mixing)
       micSource.connect(destination);
       systemSource.connect(destination);
 
       mixedStream = destination.stream;
     } else if (systemStream) {
-      // Only system audio (e.g. BlackHole only)
       mixedStream = systemStream;
-    } else {
-      // Only microphone audio
+    } else if (micStream) {
       mixedStream = micStream;
+    } else {
+      throw new Error('Tidak dapat menemukan stream audio. Pastikan mikrofon terhubung dan diizinkan.');
     }
 
     // 4. Create MediaRecorder
-    // We prefer audio/webm;codecs=opus for efficient speech compression
     let mimeType = 'audio/webm;codecs=opus';
     if (!MediaRecorder.isTypeSupported(mimeType)) {
       mimeType = 'audio/webm';
@@ -88,14 +94,10 @@ export async function startAudioRecording({ micDeviceId, systemDeviceId, useTabC
       mimeType = 'audio/ogg;codecs=opus';
     }
     if (!MediaRecorder.isTypeSupported(mimeType)) {
-      mimeType = ''; // fallback to default
+      mimeType = '';
     }
 
-    // Record at 48kbps (perfect for speech, fast upload)
-    recorder = new MediaRecorder(mixedStream, {
-      mimeType,
-      audioBitsPerSecond: 48000
-    });
+    recorder = new MediaRecorder(mixedStream, mimeType ? { mimeType, audioBitsPerSecond: 48000 } : undefined);
 
     return {
       recorder,
@@ -106,7 +108,6 @@ export async function startAudioRecording({ micDeviceId, systemDeviceId, useTabC
       mimeType
     };
   } catch (error) {
-    // Cleanup if any step fails
     if (micStream) micStream.getTracks().forEach(t => t.stop());
     if (systemStream) systemStream.getTracks().forEach(t => t.stop());
     if (audioContext) audioContext.close();
