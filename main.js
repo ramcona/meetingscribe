@@ -1,4 +1,4 @@
-const { app, BrowserWindow, globalShortcut, Tray, Menu, session, systemPreferences, ipcMain } = require('electron');
+const { app, BrowserWindow, globalShortcut, Tray, Menu, session, systemPreferences, ipcMain, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { pathToFileURL } = require('url');
@@ -114,6 +114,19 @@ ipcMain.handle('get-system-status', async () => {
     userDataPath: app.getPath('userData'),
     isDev
   };
+});
+
+ipcMain.on('show-confirm', (event, message) => {
+  const result = dialog.showMessageBoxSync(mainWindow, {
+    type: 'question',
+    buttons: ['Ya, Lanjutkan', 'Batal'],
+    defaultId: 0,
+    cancelId: 1,
+    title: 'Konfirmasi MeetingScribe',
+    message: message,
+    icon: path.join(__dirname, 'icon.png')
+  });
+  event.returnValue = result === 0; // true if 'Ya', false if 'Batal'
 });
 
 

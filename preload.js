@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   clearActivityLogs: () => ipcRenderer.invoke('clear-activity-logs'),
   addClientLog: (level, source, message, details) => ipcRenderer.invoke('add-client-log', { level, source, message, details }),
   toggleDevTools: () => ipcRenderer.invoke('toggle-devtools'),
-  getSystemStatus: () => ipcRenderer.invoke('get-system-status')
+  getSystemStatus: () => ipcRenderer.invoke('get-system-status'),
+  nativeConfirm: (message) => ipcRenderer.sendSync('show-confirm', message)
 });
 

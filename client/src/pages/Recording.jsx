@@ -283,6 +283,10 @@ export default function Recording({ meetingId, onBack, onRecordingUploaded }) {
             refreshEngineStatus();
             setIsLiveTranscriptEnabled(true);
           }}
+          onFallbackOnnx={() => {
+            setShowWhisperSetup(false);
+            setIsLiveTranscriptEnabled(true);
+          }}
         />
       )}
       {/* Navigation */}

@@ -133,6 +133,20 @@ router.get('/whisper-engine-status', (req, res) => {
   res.json(status);
 });
 
+// GET /api/active-engine - returns the currently active engine based on settings
+router.get('/active-engine', (req, res) => {
+  const setting = dbHelpers.getSetting('transcription_engine') || 'auto';
+  const apiKey = dbHelpers.getSetting('gemini_api_key');
+  const localStatus = getWhisperSetupStatus();
+  
+  let activeEngine = 'gemini';
+  if (setting === 'local_whisper' || (setting === 'auto' && !apiKey)) {
+    activeEngine = localStatus.engine === 'whisper.cpp' ? 'whisper.cpp' : 'onnx';
+  }
+  
+  res.json({ engine: activeEngine });
+});
+
 // POST /api/whisper-setup – on-demand clone+compile+download, streams progress via SSE
 router.get('/whisper-setup', async (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
@@ -665,5 +679,50 @@ router.post('/logs', (req, res) => {
   }
 });
 
+// 18. System resource stats (CPU + RAM)
+import os from 'os';
+
+function getCpuUsage() {
+  return new Promise((resolve) => {
+    const cpus1 = os.cpus();
+
+    setTimeout(() => {
+      const cpus2 = os.cpus();
+      let totalIdle = 0, totalTick = 0;
+
+      for (let i = 0; i < cpus1.length; i++) {
+        const before = cpus1[i].times;
+        const after = cpus2[i].times;
+        const idleDiff = after.idle - before.idle;
+        const totalDiff = Object.values(after).reduce((a, b) => a + b, 0)
+          - Object.values(before).reduce((a, b) => a + b, 0);
+        totalIdle += idleDiff;
+        totalTick += totalDiff;
+      }
+
+      const usage = totalTick === 0 ? 0 : Math.round((1 - totalIdle / totalTick) * 100);
+      resolve(Math.min(100, Math.max(0, usage)));
+    }, 500);
+  });
+}
+
+router.get('/system-stats', async (req, res) => {
+  try {
+    const cpuPct = await getCpuUsage();
+    const totalMem = os.totalmem();
+    const freeMem = os.freemem();
+    const usedMem = totalMem - freeMem;
+    res.json({
+      cpu_pct: cpuPct,
+      ram_used_mb: Math.round(usedMem / 1024 / 1024),
+      ram_total_mb: Math.round(totalMem / 1024 / 1024),
+      ram_pct: Math.round((usedMem / totalMem) * 100),
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch system stats' });
+  }
+});
+
 export default router;
+
 

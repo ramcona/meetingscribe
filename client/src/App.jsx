@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Calendar, Settings as SettingsIcon, Mic, HelpCircle, Sparkles } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Calendar, Settings as SettingsIcon, Cpu, Sparkles, Zap, Brain } from 'lucide-react';
 import logoImg from '../public/icon.png';
 import Dashboard from './pages/Dashboard';
 import Recording from './pages/Recording';
@@ -7,13 +7,15 @@ import Detail from './pages/Detail';
 import Settings from './pages/Settings';
 import { RecordingProvider } from './context/RecordingContext';
 import FloatingRecordingBar from './components/FloatingRecordingBar';
+import SystemStats from './components/SystemStats';
 
 export default function App() {
-  const [page, setPage] = useState('dashboard'); // 'dashboard' | 'recording' | 'detail' | 'settings'
+  const [page, setPage] = useState('dashboard');
   const [selectedMeetingId, setSelectedMeetingId] = useState(null);
   const [appName, setAppName] = useState('MeetingScribe');
+  const [engineStatus, setEngineStatus] = useState(null);
 
-  React.useEffect(() => {
+  useEffect(() => {
     fetch('http://localhost:3001/api/settings')
       .then(res => res.json())
       .then(data => {
@@ -23,6 +25,17 @@ export default function App() {
         }
       })
       .catch(err => console.error('Error fetching app name:', err));
+    const fetchActiveEngine = () => {
+      fetch('http://localhost:3001/api/active-engine')
+        .then(r => r.json())
+        .then(setEngineStatus)
+        .catch(() => {});
+    };
+
+    fetchActiveEngine();
+    const engineInterval = setInterval(fetchActiveEngine, 3000);
+
+    return () => clearInterval(engineInterval);
   }, []);
 
   const handleSelectMeeting = (id, status) => {
@@ -78,7 +91,7 @@ export default function App() {
 
   return (
     <RecordingProvider>
-      <div className="flex min-h-screen bg-[#0A0A0B] text-[#F3F4F6] font-sans antialiased relative">
+      <div className="flex h-screen overflow-hidden bg-[#0A0A0B] text-[#F3F4F6] font-sans antialiased relative">
         {/* Side Navigation Bar */}
         <aside className="w-64 bg-[#111113] border-r border-white/5 flex flex-col justify-between shrink-0 hidden md:flex">
           <div className="p-6 space-y-8">
@@ -119,16 +132,52 @@ export default function App() {
           </div>
 
           {/* Footer info in sidebar */}
-          <div className="p-6 border-t border-white/5 space-y-4">
-            <div className="flex items-center gap-2 text-[10px] text-gray-500 font-mono">
-              <Sparkles size={11} className="text-indigo-400" />
-              Gemini AI Powered
+          <div className="p-5 border-t border-white/5 space-y-4">
+            {/* CPU + RAM stats */}
+            <SystemStats />
+
+            {/* Active Transcription Engine */}
+            <div className="space-y-1.5">
+              <span className="text-[9px] font-mono text-gray-600 uppercase tracking-widest">Engine Aktif</span>
+              {engineStatus ? (
+                <div className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border text-[10px] font-semibold ${
+                  engineStatus.engine === 'whisper.cpp'
+                    ? 'bg-emerald-500/8 border-emerald-500/20 text-emerald-400'
+                    : engineStatus.engine === 'onnx'
+                    ? 'bg-amber-500/8 border-amber-500/20 text-amber-400'
+                    : 'bg-purple-500/8 border-purple-500/20 text-purple-400'
+                }`}>
+                  {engineStatus.engine === 'whisper.cpp' ? (
+                    <Zap size={10} className="shrink-0" />
+                  ) : engineStatus.engine === 'onnx' ? (
+                    <Cpu size={10} className="shrink-0" />
+                  ) : (
+                    <Brain size={10} className="shrink-0" />
+                  )}
+                  <span className="truncate">
+                    {engineStatus.engine === 'whisper.cpp'
+                      ? 'whisper.cpp Metal GPU'
+                      : engineStatus.engine === 'onnx'
+                      ? 'ONNX Whisper (Lokal)'
+                      : 'Gemini AI Cloud'}
+                  </span>
+                </div>
+              ) : (
+                <div className="h-6 bg-white/5 rounded-lg animate-pulse" />
+              )}
+            </div>
+
+            <div className="border-t border-white/5 pt-3">
+              <div className="flex items-center gap-2 text-[10px] text-gray-500 font-mono">
+                <Sparkles size={11} className="text-indigo-400" />
+                Gemini AI Powered
+              </div>
             </div>
           </div>
         </aside>
 
         {/* Main Content Area */}
-        <div className="flex-1 flex flex-col min-w-0">
+        <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
           {/* Mobile Navigation Header */}
           <header className="md:hidden bg-[#111113] border-b border-white/5 px-6 py-4 flex items-center justify-between shrink-0">
             <div className="flex items-center gap-2.5">

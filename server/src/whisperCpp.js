@@ -11,6 +11,19 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const GGML_TINY_URL = 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin';
 const WHISPER_CPP_GIT = 'https://github.com/ggml-org/whisper.cpp.git';
 
+// Resolve cmake binary: probe Homebrew paths before falling back to PATH
+function getCmakePath() {
+  const candidates = [
+    '/opt/homebrew/bin/cmake',   // Apple Silicon Homebrew
+    '/usr/local/bin/cmake',      // Intel Homebrew
+    '/usr/bin/cmake',            // System cmake
+  ];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p;
+  }
+  return 'cmake'; // let the shell resolve it from PATH
+}
+
 function getWhisperBinDir() {
   const dataDir = process.env.DATA_DIR || path.join(__dirname, '../data');
   return path.join(dataDir, 'whisper-bin');
@@ -73,23 +86,40 @@ export function getWhisperSetupStatus() {
 
 function downloadFile(url, destPath, onProgress) {
   return new Promise((resolve, reject) => {
-    const file = fs.createWriteStream(destPath);
-    const protocol = url.startsWith('https') ? https : http;
+    let settled = false;
+    const done = (fn) => { if (!settled) { settled = true; fn(); } };
 
-    const doGet = (u) => {
-      protocol.get(u, (res) => {
-        if (res.statusCode === 301 || res.statusCode === 302) {
-          file.close();
-          return doGet(res.headers.location);
+    // Follow all redirects first, then open the file and stream
+    const follow = (u, hops = 0) => {
+      if (hops > 15) return done(() => reject(new Error('Too many redirects')));
+
+      const proto = u.startsWith('https') ? https : http;
+      const req = proto.get(u, {
+        headers: { 'User-Agent': 'MeetingScribe/1.0 Node.js' }
+      }, (res) => {
+        // Follow redirects
+        if ([301, 302, 303, 307, 308].includes(res.statusCode)) {
+          res.resume(); // drain body so socket is released
+          const location = res.headers.location;
+          if (!location) return done(() => reject(new Error('Redirect with no Location header')));
+          // Resolve relative redirects
+          const nextUrl = location.startsWith('http') ? location : new URL(location, u).href;
+          return follow(nextUrl, hops + 1);
         }
+
         if (res.statusCode !== 200) {
-          file.close();
-          fs.unlink(destPath, () => {});
-          return reject(new Error(`HTTP ${res.statusCode} for ${u}`));
+          res.resume();
+          return done(() => reject(new Error(`HTTP ${res.statusCode} saat mengunduh model dari ${u}`)));
         }
 
         const total = parseInt(res.headers['content-length'] || '0', 10);
         let received = 0;
+
+        const file = fs.createWriteStream(destPath);
+
+        file.on('error', (err) => {
+          done(() => { try { fs.unlinkSync(destPath); } catch (e) {} reject(err); });
+        });
 
         res.on('data', (chunk) => {
           received += chunk.length;
@@ -98,13 +128,28 @@ function downloadFile(url, destPath, onProgress) {
           }
         });
 
+        res.on('error', (err) => {
+          file.destroy();
+          done(() => { try { fs.unlinkSync(destPath); } catch (e) {} reject(err); });
+        });
+
         res.pipe(file);
-        file.on('finish', () => { file.close(); resolve(destPath); });
-        res.on('error', (err) => { file.close(); fs.unlink(destPath, () => {}); reject(err); });
-      }).on('error', (err) => { file.close(); fs.unlink(destPath, () => {}); reject(err); });
+
+        file.on('finish', () => {
+          file.close(() => done(() => resolve(destPath)));
+        });
+      });
+
+      req.setTimeout(60000, () => {
+        req.destroy(new Error('Download timeout — koneksi terlalu lambat atau terputus setelah 60 detik'));
+      });
+
+      req.on('error', (err) => {
+        done(() => { try { fs.unlinkSync(destPath); } catch (e) {} reject(err); });
+      });
     };
 
-    doGet(url);
+    follow(url);
   });
 }
 
@@ -153,7 +198,7 @@ function cmakeConfigure(repoDir, onLog) {
       args.push('-DGGML_METAL=ON');
     }
 
-    const cmake = spawn('cmake', args);
+    const cmake = spawn(getCmakePath(), args);
     cmake.stdout.on('data', d => onLog(d.toString().trim()));
     cmake.stderr.on('data', d => onLog(d.toString().trim()));
     cmake.on('close', (code) => {
@@ -172,14 +217,15 @@ function cmakeBuild(repoDir, onLog) {
 
     onLog(`Mengcompile whisper.cpp (${cpuCount} thread)... Ini mungkin 2-5 menit.`);
 
-    const cmake = spawn('cmake', ['--build', buildDir, '-j', String(cpuCount), '--config', 'Release', '--target', 'whisper-cli']);
+    const cmakePath = getCmakePath();
+    const cmake = spawn(cmakePath, ['--build', buildDir, '-j', String(cpuCount), '--config', 'Release', '--target', 'whisper-cli']);
     cmake.stdout.on('data', d => onLog(d.toString().trim()));
     cmake.stderr.on('data', d => onLog(d.toString().trim()));
     cmake.on('close', (code) => {
       if (code !== 0) {
         // Try building 'main' target as fallback (older whisper.cpp)
         onLog('whisper-cli target tidak ada, mencoba target "main"...');
-        const cmake2 = spawn('cmake', ['--build', buildDir, '-j', String(cpuCount), '--config', 'Release', '--target', 'main']);
+        const cmake2 = spawn(cmakePath, ['--build', buildDir, '-j', String(cpuCount), '--config', 'Release', '--target', 'main']);
         cmake2.stdout.on('data', d => onLog(d.toString().trim()));
         cmake2.stderr.on('data', d => onLog(d.toString().trim()));
         cmake2.on('close', (code2) => {
@@ -234,10 +280,11 @@ export async function runWhisperCppSetup(emitProgress) {
     if (!fs.existsSync(binDir)) fs.mkdirSync(binDir, { recursive: true });
 
     // --- 1. Check cmake ---
+    const cmakeBin = getCmakePath();
     emitProgress('check', 5, 'Memeriksa cmake...');
     await new Promise((resolve, reject) => {
-      exec('cmake --version', (err) => {
-        if (err) return reject(new Error('cmake tidak ditemukan. Install Xcode Command Line Tools dulu: xcode-select --install'));
+      execFile(cmakeBin, ['--version'], (err) => {
+        if (err) return reject(new Error(`cmake tidak ditemukan (dicoba: ${cmakeBin}). Install via: brew install cmake  —atau—  xcode-select --install`));
         resolve();
       });
     });

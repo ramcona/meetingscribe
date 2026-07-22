@@ -38,6 +38,7 @@ export function RecordingProvider({ children }) {
   const audioContextRef = useRef(null);
   const timerRef = useRef(null);
   const chunksRef = useRef([]);
+  const durationRef = useRef(0); // always-current duration for live transcript timestamps
 
   const isSpeechSupported = typeof window !== 'undefined' && ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window);
 
@@ -48,6 +49,7 @@ export function RecordingProvider({ children }) {
     if (!isRecording || isPaused || !isLiveTranscriptEnabled || liveEngine !== 'whisper') {
       if (liveChunkRecorderRef.current && liveChunkRecorderRef.current.state !== 'inactive') {
         try { liveChunkRecorderRef.current.stop(); } catch (e) {}
+        liveChunkRecorderRef.current = null;
       }
       return;
     }
@@ -56,55 +58,95 @@ export function RecordingProvider({ children }) {
     const targetStream = streams.mixed || streams.mic;
     if (!targetStream) return;
 
-    try {
-      const chunkRecorder = new MediaRecorder(targetStream, { mimeType: 'audio/webm' });
-      let chunkData = [];
+    const mimeType = ['audio/webm;codecs=opus', 'audio/webm'].find(
+      t => MediaRecorder.isTypeSupported(t)
+    ) || '';
 
-      chunkRecorder.ondataavailable = async (e) => {
-        if (e.data && e.data.size > 1000) {
-          chunkData.push(e.data);
-          const blob = new Blob(chunkData, { type: 'audio/webm' });
-          chunkData = [];
+    let isActive = true;
+    let cycleTimeout = null;
 
-          const formData = new FormData();
-          formData.append('audio_chunk', blob, 'chunk.webm');
+    // ── Stop/start cycle ────────────────────────────────────────────────────
+    // Each cycle creates a BRAND NEW MediaRecorder so every blob has its own
+    // WebM initialization segment and is independently decodable by ffmpeg.
+    // Prepending the init segment to timesliced chunks is unreliable because
+    // cluster timestamps overlap and ffmpeg rejects the data as invalid.
+    const runCycle = () => {
+      if (!isActive) return;
 
-          try {
-            const res = await fetch('http://localhost:3001/api/live-whisper-chunk', {
-              method: 'POST',
-              body: formData
-            });
+      const cycleChunks = [];
+      let recorder;
 
-            if (res.ok) {
-              const data = await res.json();
-              if (data.text && data.text.trim()) {
-                setLiveTranscriptSegments(prev => [
-                  ...prev,
-                  {
-                    id: Date.now() + '-' + Math.random().toString(36).substring(2, 6),
-                    timestamp: duration,
-                    text: data.text.trim(),
-                    isFinal: true
-                  }
-                ]);
-              }
-            }
-          } catch (err) {
-            console.warn('[LiveWhisper] Chunk fetch error:', err);
-          }
-        }
+      try {
+        recorder = new MediaRecorder(targetStream, mimeType ? { mimeType } : {});
+      } catch (err) {
+        setLiveTranscriptError('Gagal memulai live transcript: ' + err.message);
+        return;
+      }
+
+      liveChunkRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) cycleChunks.push(e.data);
       };
 
-      chunkRecorder.start(4000);
-      liveChunkRecorderRef.current = chunkRecorder;
+      recorder.onstop = async () => {
+        if (!isActive) return;
+
+        if (cycleChunks.length > 0) {
+          const blob = new Blob(cycleChunks, { type: mimeType || 'audio/webm' });
+
+          if (blob.size >= 1000) {
+            const formData = new FormData();
+            formData.append('audio_chunk', blob, 'chunk.webm');
+
+            try {
+              const res = await fetch('http://localhost:3001/api/live-whisper-chunk', {
+                method: 'POST',
+                body: formData
+              });
+              if (res.ok) {
+                const data = await res.json();
+                if (data.text && data.text.trim()) {
+                  setLiveTranscriptSegments(prev => [
+                    ...prev,
+                    {
+                      id: Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+                      timestamp: durationRef.current,
+                      text: data.text.trim(),
+                      isFinal: true
+                    }
+                  ]);
+                }
+              }
+            } catch (err) {
+              console.warn('[LiveWhisper] Chunk fetch error:', err);
+            }
+          }
+        }
+
+        // Start next cycle immediately after onstop
+        if (isActive) runCycle();
+      };
+
+      recorder.start();
       setLiveTranscriptError('');
-    } catch (err) {
-      console.error('[LiveWhisper] Failed to start live chunk recorder:', err);
-    }
+
+      // Stop after 5 seconds → triggers onstop → sends blob → starts next cycle
+      cycleTimeout = setTimeout(() => {
+        if (recorder.state === 'recording') {
+          try { recorder.stop(); } catch (e) {}
+        }
+      }, 5000);
+    };
+
+    runCycle();
 
     return () => {
+      isActive = false;
+      if (cycleTimeout) clearTimeout(cycleTimeout);
       if (liveChunkRecorderRef.current && liveChunkRecorderRef.current.state !== 'inactive') {
         try { liveChunkRecorderRef.current.stop(); } catch (e) {}
+        liveChunkRecorderRef.current = null;
       }
     };
   }, [isRecording, isPaused, isLiveTranscriptEnabled, liveEngine]);
@@ -296,7 +338,7 @@ export function RecordingProvider({ children }) {
       }
 
       timerRef.current = setInterval(() => {
-        setDuration(prev => prev + 1);
+        setDuration(prev => { durationRef.current = prev + 1; return prev + 1; });
       }, 1000);
 
     } catch (err) {
@@ -319,7 +361,7 @@ export function RecordingProvider({ children }) {
       recorderRef.current.resume();
       setIsPaused(false);
       timerRef.current = setInterval(() => {
-        setDuration(prev => prev + 1);
+        setDuration(prev => { durationRef.current = prev + 1; return prev + 1; });
       }, 1000);
     }
   };

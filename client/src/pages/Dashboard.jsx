@@ -190,7 +190,12 @@ export default function Dashboard({ onSelectMeeting, onCreateNew }) {
 
   const handleDelete = async (e, id) => {
     e.stopPropagation(); // Avoid triggering open meeting
-    if (!confirm('Apakah Anda yakin ingin menghapus riwayat meeting ini? Semua file rekaman, transkrip, dan ringkasan akan dihapus permanen.')) {
+    const msg = 'Apakah Anda yakin ingin menghapus riwayat meeting ini? Semua file rekaman, transkrip, dan ringkasan akan dihapus permanen.';
+    const confirmed = window.electronAPI?.nativeConfirm
+      ? window.electronAPI.nativeConfirm(msg)
+      : window.confirm(msg);
+
+    if (!confirmed) {
       return;
     }
 

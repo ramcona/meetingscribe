@@ -344,10 +344,10 @@ export default function Settings() {
                 >
                   <option value="auto">Auto (Gemini AI Cloud + Fallback Local Whisper Offline)</option>
                   <option value="gemini">Google Gemini 3.5 Flash (Cloud - Diarization & Fast)</option>
-                  <option value="local_whisper">Local Offline Whisper (100% Private, Zero Cloud & Zero Internet)</option>
+                  <option value="local_whisper">whisper.cpp (Local Offline, Zero Cloud & Zero Internet)</option>
                 </select>
                 <p className="text-[11px] text-gray-500 leading-relaxed">
-                  Mode <strong>Local Offline Whisper</strong> berjalan sepenuhnya di komputer lokal Anda tanpa membutuhkan koneksi internet atau kuota API.
+                  Mode <strong>whisper.cpp</strong> berjalan sepenuhnya di komputer lokal Anda tanpa membutuhkan koneksi internet atau kuota API.
                 </p>
               </div>
 

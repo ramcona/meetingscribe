@@ -36,6 +36,7 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
   const [notesSavedState, setNotesSavedState] = useState('idle'); // 'idle' | 'saving' | 'saved' | 'error'
   const [summaryLanguage, setSummaryLanguage] = useState('id'); // 'id' | 'en' | 'bilingual'
   const [transcriptSubTab, setTranscriptSubTab] = useState('ai'); // 'ai' | 'live'
+  const [whisperEngineStatus, setWhisperEngineStatus] = useState(null);
   const saveTimeoutRef = useRef(null);
 
   // Speakers list states
@@ -75,6 +76,12 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
 
   useEffect(() => {
     fetchMeetingDetail();
+
+    // Fetch active transcription engine
+    fetch('http://localhost:3001/api/active-engine')
+      .then(r => r.json())
+      .then(setWhisperEngineStatus)
+      .catch(() => {});
     
     // Set up polling if transcribing
     let pollInterval = null;
@@ -330,7 +337,12 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
   };
 
   const handleCancelTranscription = async () => {
-    if (!window.confirm('Apakah Anda yakin ingin membatalkan proses transkripsi ini? Semua data suara yang direkam akan dihapus.')) return;
+    const msg = 'Apakah Anda yakin ingin membatalkan proses transkripsi? Rekaman audio tetap tersimpan dan bisa ditranskripsi ulang nanti.';
+    const confirmed = window.electronAPI?.nativeConfirm 
+      ? window.electronAPI.nativeConfirm(msg) 
+      : window.confirm(msg);
+      
+    if (!confirmed) return;
     setCancelling(true);
     try {
       const res = await fetch(`http://localhost:3001/api/meetings/${meetingId}/cancel`, {
@@ -629,7 +641,7 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
                       transcriptSubTab === 'ai' ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-white'
                     }`}
                   >
-                    AI Presisi ({meeting.segments?.length || 0})
+                    Transkrip Utama ({meeting.segments?.length || 0})
                   </button>
                   <button
                     onClick={() => setTranscriptSubTab('live')}
@@ -669,7 +681,15 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
                   <div className="space-y-1">
                     <h4 className="text-xs font-medium text-white">Transcribing Audio...</h4>
                     <p className="text-[11px] text-gray-500 leading-relaxed max-w-xs">
-                      Gemini API sedang menerjemahkan audio dan memilah pembicara ({meeting.progress || 10}%).
+                      {(() => {
+                        const pct = meeting.progress || 10;
+                        if (whisperEngineStatus?.engine === 'whisper.cpp') {
+                          return `whisper.cpp Metal GPU sedang mentranskripsi audio (${pct}%).`;
+                        } else if (whisperEngineStatus?.engine === 'onnx') {
+                          return `ONNX Whisper (lokal) sedang mentranskripsi audio (${pct}%).`;
+                        }
+                        return `Gemini AI Cloud sedang mentranskripsi dan memilah pembicara (${pct}%).`;
+                      })()}
                     </p>
                   </div>
                   
@@ -692,7 +712,7 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
                   </div>
                   
                   <button
-                    onClick={handleReanalyze}
+                    onClick={() => handleReanalyze()}
                     disabled={reanalyzing}
                     className="bg-[#1D1D21] hover:bg-white/5 border border-white/5 hover:border-white/10 text-white text-xs font-semibold px-4 py-2.5 rounded-xl transition cursor-pointer flex items-center gap-1.5"
                   >
@@ -711,7 +731,7 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
                   </div>
                   
                   <button
-                    onClick={handleReanalyze}
+                    onClick={() => handleReanalyze()}
                     disabled={reanalyzing}
                     className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold px-4 py-2.5 rounded-xl border border-indigo-500/10 transition shadow-lg shadow-indigo-600/10 cursor-pointer flex items-center gap-1.5"
                   >
@@ -735,7 +755,7 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
                 ) : (
                   <div className="space-y-3 font-sans text-xs">
                     <div className="p-3 bg-indigo-950/20 border border-indigo-500/20 rounded-xl text-[11px] text-indigo-300 flex items-center justify-between">
-                      <span>Draft Transkrip Real-Time (Disimpan terpisah dari Transkrip AI Presisi)</span>
+                      <span>Draft Transkrip Real-Time (Disimpan terpisah dari Transkrip Utama)</span>
                       <span className="font-mono text-[10px] text-indigo-400 font-bold">{meeting.live_segments.length} Frasa</span>
                     </div>
 
@@ -761,7 +781,7 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
                   <div className="h-64 flex flex-col items-center justify-center text-center p-6 space-y-4">
                     <FileText size={28} className="text-indigo-400" />
                     <div className="space-y-1.5">
-                      <h4 className="text-xs font-semibold text-white">Belum Ada Transkrip AI Presisi</h4>
+                      <h4 className="text-xs font-semibold text-white">Belum Ada Transkrip Utama</h4>
                       <p className="text-[11px] text-gray-500 leading-relaxed max-w-xs">
                         File rekaman audio sudah tersimpan. Klik tombol di bawah untuk memulai transkripsi otomatis.
                       </p>

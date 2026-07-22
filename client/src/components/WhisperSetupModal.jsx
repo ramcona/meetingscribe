@@ -6,7 +6,7 @@ import { X, Download, Terminal, CheckCircle, AlertTriangle, Cpu, Zap, RefreshCw 
  * Shows when whisper.cpp is not yet installed.
  * Streams build+download progress via SSE.
  */
-export default function WhisperSetupModal({ onClose, onDone }) {
+export default function WhisperSetupModal({ onClose, onDone, onFallbackOnnx }) {
   const [stage, setStage] = useState('idle'); // idle | running | done | error
   const [pct, setPct] = useState(0);
   const [logs, setLogs] = useState([]);
@@ -38,7 +38,7 @@ export default function WhisperSetupModal({ onClose, onDone }) {
     es.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data);
-        setPct(data.pct || 0);
+        if (data.stage !== 'log') setPct(data.pct ?? 0);
         if (data.message) {
           setLogs(prev => [...prev, data.message]);
         }
@@ -187,9 +187,9 @@ export default function WhisperSetupModal({ onClose, onDone }) {
               {stage === 'error' && (
                 <div className="p-3 bg-red-500/5 border border-red-500/20 rounded-xl text-[11px] text-red-400 space-y-1">
                   <p className="font-semibold">Troubleshooting:</p>
-                  <p>• Pastikan Xcode Command Line Tools terinstall: <span className="font-mono">xcode-select --install</span></p>
-                  <p>• Pastikan cmake tersedia: <span className="font-mono">brew install cmake</span></p>
-                  <p>• Pastikan koneksi internet aktif untuk clone & download model</p>
+                  <p>• Jika cmake tidak ditemukan, install via: <span className="font-mono">brew install cmake</span></p>
+                  <p>• Atau install Xcode Command Line Tools: <span className="font-mono">xcode-select --install</span></p>
+                  <p>• Pastikan koneksi internet aktif untuk clone &amp; download model</p>
                 </div>
               )}
             </div>
@@ -201,7 +201,7 @@ export default function WhisperSetupModal({ onClose, onDone }) {
           {stage === 'idle' && (
             <>
               <button
-                onClick={onClose}
+                onClick={() => onFallbackOnnx ? onFallbackOnnx() : onClose()}
                 className="text-xs text-gray-400 hover:text-white transition cursor-pointer"
               >
                 Nanti saja (pakai ONNX)
