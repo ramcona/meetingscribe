@@ -43,6 +43,11 @@ server/data/recordings/*
 !server/data/recordings/.gitkeep
 server/data/models/
 server/data/models/*
+server/data/whisper-bin/
+server/data/whisper-bin/*
+server/data/temp_*
+server/data/*.wav
+server/data/*.webm
 
 # System & OS Files
 .DS_Store

@@ -58,32 +58,60 @@ export async function startAudioRecording({ micDeviceId, systemDeviceId, useTabC
     } else if (systemDeviceId && systemDeviceId !== 'default' && systemDeviceId !== micDeviceId) {
       try {
         systemStream = await navigator.mediaDevices.getUserMedia({
-          audio: { deviceId: { ideal: systemDeviceId } }
+          audio: { deviceId: { exact: systemDeviceId } }
         });
       } catch (sysErr) {
         console.warn('System device capture failed, continuing with microphone:', sysErr);
       }
     }
 
-    // 3. Mix streams if we have both, or select active single stream
-    if (micStream && systemStream) {
-      audioContext = new (window.AudioContext || window.webkitAudioContext)();
-      
+    // 3. Always route through Web Audio API (fixes Mac/BlackHole silent recording bug in MediaRecorder)
+    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    
+    // CRITICAL: Ensure the audio context is running, as it might start suspended if created after async getUserMedia
+    if (audioContext.state === 'suspended') {
+      await audioContext.resume().catch(e => console.warn('Failed to resume AudioContext:', e));
+    }
+    console.log('AudioContext state:', audioContext.state);
+
+    const destination = audioContext.createMediaStreamDestination();
+    const dummyElements = [];
+
+    // CRITICAL: Force the WebAudio graph to tick by connecting to the physical destination with an inaudible but non-zero volume.
+    // Setting this to exactly 0 can trigger Chromium optimizations that prune/silence the audio processing branch.
+    const silenceGain = audioContext.createGain();
+    silenceGain.gain.value = 0.00001; 
+    silenceGain.connect(audioContext.destination);
+
+    // CRITICAL 2: Keep the MediaRecorder alive by feeding a continuous silent oscillator into the destination.
+    // Without this, Chrome may treat virtual device streams as "inactive" and output a completely silent WebM!
+    const keepAliveOsc = audioContext.createOscillator();
+    const keepAliveGain = audioContext.createGain();
+    keepAliveGain.gain.value = 0.00001; // completely silent but active
+    keepAliveOsc.connect(keepAliveGain);
+    keepAliveGain.connect(destination);
+    keepAliveOsc.start();
+
+    if (micStream) {
       const micSource = audioContext.createMediaStreamSource(micStream);
-      const systemSource = audioContext.createMediaStreamSource(systemStream);
-      const destination = audioContext.createMediaStreamDestination();
-
       micSource.connect(destination);
-      systemSource.connect(destination);
+      micSource.connect(silenceGain);
+    }
 
-      mixedStream = destination.stream;
-    } else if (systemStream) {
-      mixedStream = systemStream;
-    } else if (micStream) {
-      mixedStream = micStream;
-    } else {
+    if (systemStream) {
+      const systemSource = audioContext.createMediaStreamSource(systemStream);
+      systemSource.connect(destination);
+      systemSource.connect(silenceGain);
+    }
+
+    if (!micStream && !systemStream) {
       throw new Error('Tidak dapat menemukan stream audio. Pastikan mikrofon terhubung dan diizinkan.');
     }
+
+    mixedStream = destination.stream;
+
+    // Give the AudioContext graph a moment to start processing and push data to the stream tracks
+    await new Promise(resolve => setTimeout(resolve, 500));
 
     // 4. Create MediaRecorder
     let mimeType = 'audio/webm;codecs=opus';

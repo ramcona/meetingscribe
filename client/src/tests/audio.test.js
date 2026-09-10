@@ -25,8 +25,28 @@ Object.defineProperty(globalThis, 'navigator', {
 
 global.window = {
   AudioContext: class {
+    constructor() {
+      this.state = 'suspended';
+      this.destination = {};
+    }
     createMediaStreamSource() { return { connect: () => {} }; }
     createMediaStreamDestination() { return { stream: {} }; }
+    createGain() { 
+      return { 
+        gain: { value: 0 }, 
+        connect: () => {} 
+      }; 
+    }
+    createOscillator() { 
+      return { 
+        connect: () => {}, 
+        start: () => {} 
+      }; 
+    }
+    resume() { 
+      this.state = 'running';
+      return Promise.resolve(); 
+    }
     close() {}
   }
 };

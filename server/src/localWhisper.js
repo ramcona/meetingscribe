@@ -14,6 +14,7 @@ env.cacheDir = path.join(__dirname, '../data/models');
 env.allowLocalModels = true;
 
 let whisperPipelineInstance = null;
+let whisperPipelineLoading = null; // Promise guard — prevents concurrent init
 
 function getFfmpegPath() {
   const possiblePaths = [
@@ -73,16 +74,30 @@ export function readWavAudioToFloat32Array(wavPath) {
   return float32Array;
 }
 
-// Lazy-load Whisper Pipeline
+// Lazy-load Whisper Pipeline with mutex guard to prevent concurrent initialization
 async function getWhisperPipeline(modelName = 'Xenova/whisper-tiny') {
-  if (!whisperPipelineInstance) {
-    console.log(`[LocalWhisper] Initializing local ONNX model (${modelName})...`);
-    whisperPipelineInstance = await pipeline('automatic-speech-recognition', modelName, {
-      quantized: true
-    });
-    console.log(`[LocalWhisper] Local ONNX Whisper model loaded successfully.`);
+  if (whisperPipelineInstance) return whisperPipelineInstance;
+
+  // If already loading, wait for that promise instead of starting a second load
+  if (whisperPipelineLoading) {
+    console.log('[LocalWhisper] Pipeline loading already in progress, waiting...');
+    return await whisperPipelineLoading;
   }
-  return whisperPipelineInstance;
+
+  console.log(`[LocalWhisper] Initializing local ONNX model (${modelName})...`);
+  whisperPipelineLoading = pipeline('automatic-speech-recognition', modelName, {
+    quantized: true
+  }).then(instance => {
+    whisperPipelineInstance = instance;
+    whisperPipelineLoading = null;
+    console.log(`[LocalWhisper] Local ONNX Whisper model loaded successfully.`);
+    return instance;
+  }).catch(err => {
+    whisperPipelineLoading = null; // Reset so next call can retry
+    throw err;
+  });
+
+  return await whisperPipelineLoading;
 }
 
 /**
@@ -119,7 +134,8 @@ export async function transcribeLocalAudio(meetingId, filePath) {
     console.log(`[WhisperCpp] Found native C++ binary at ${findWhisperCppBinary()}. Using Metal GPU acceleration...`);
     try {
       if (!(await updateProgress(20))) return;
-      const rawSegments = await transcribeWithWhisperCpp(filePath, { language: 'id' });
+      const whisperLang = dbHelpers.getSetting('whisper_language') || 'auto';
+      const rawSegments = await transcribeWithWhisperCpp(filePath, { language: whisperLang });
       if (!(await updateProgress(85))) return;
 
       const segments = rawSegments.map(s => ({

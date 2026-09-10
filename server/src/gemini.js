@@ -5,6 +5,21 @@ import { getAudioDuration, normalizeAndRescaleSegments, formatTime } from './aud
 import { transcribeLocalAudio } from './localWhisper.js';
 import fs from 'fs';
 
+// Detect audio MIME type from file extension
+function getAudioMimeType(filePath) {
+  const ext = (filePath || '').split('.').pop().toLowerCase();
+  const mimeMap = {
+    webm: 'audio/webm',
+    wav: 'audio/wav',
+    mp3: 'audio/mpeg',
+    ogg: 'audio/ogg',
+    m4a: 'audio/mp4',
+    aac: 'audio/aac',
+    flac: 'audio/flac',
+  };
+  return mimeMap[ext] || 'audio/webm';
+}
+
 // Get the Gemini API Key
 function getApiKey() {
   return dbHelpers.getSetting('gemini_api_key') || process.env.GEMINI_API_KEY;
@@ -182,7 +197,7 @@ export async function transcribeAudio(meetingId, filePath, options = {}) {
     
     console.log(`[Gemini Privacy Guard] Uploading ${filePath} to Gemini Files API...`);
     const uploadResult = await fileManager.uploadFile(filePath, {
-      mimeType: 'audio/webm',
+      mimeType: getAudioMimeType(filePath),
       displayName: `meeting-${meetingId}`
     });
     console.log(`[Gemini Privacy Guard] Uploaded successfully: ${uploadResult.file.uri}`);

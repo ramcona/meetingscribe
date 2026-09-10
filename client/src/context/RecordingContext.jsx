@@ -280,7 +280,15 @@ export function RecordingProvider({ children }) {
     const streams = activeStreamsRef.current;
     if (streams.mic) streams.mic.getTracks().forEach(t => t.stop());
     if (streams.system) streams.system.getTracks().forEach(t => t.stop());
-    if (streams.mixed) streams.mixed.getTracks().forEach(t => t.stop());
+    if (streams.mixed) {
+      streams.mixed.getTracks().forEach(t => t.stop());
+      if (streams.mixed._dummyAudioElements) {
+        streams.mixed._dummyAudioElements.forEach(el => {
+          el.pause();
+          el.srcObject = null;
+        });
+      }
+    }
     if (audioContextRef.current) {
       audioContextRef.current.close();
       audioContextRef.current = null;

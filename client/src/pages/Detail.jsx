@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { ArrowLeft, Clock, Calendar, Users, Mic, Video, Edit2, Check, X, FileText, Sparkles, Copy, RefreshCw, AlertTriangle, Play, Pause, Volume2 } from 'lucide-react';
+import { ArrowLeft, Clock, Calendar, Users, Mic, Video, Edit2, Check, X, FileText, Sparkles, Copy, RefreshCw, AlertTriangle, Play, Pause, Volume2, Download } from 'lucide-react';
 
 // Format seconds into MM:SS
 function formatDuration(sec) {
@@ -74,30 +74,57 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
     }
   }, [activeSegmentIdx]);
 
+  // One-time setup on mount: fetch data + engine status
   useEffect(() => {
     fetchMeetingDetail();
 
-    // Fetch active transcription engine
     fetch('http://localhost:3001/api/active-engine')
       .then(r => r.json())
       .then(setWhisperEngineStatus)
       .catch(() => {});
-    
-    // Set up polling if transcribing
-    let pollInterval = null;
-    if (meeting && (meeting.status === 'transcribing' || meeting.status === 'recording')) {
-      pollInterval = setInterval(() => {
-        fetchMeetingDetail();
-      }, 3000);
-    }
 
     return () => {
-      if (pollInterval) clearInterval(pollInterval);
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current);
       }
     };
-  }, [meetingId, meeting?.status]);
+  }, [meetingId]);
+
+  // Separate effect: start/stop poll based on meeting status AFTER data is loaded
+  useEffect(() => {
+    if (!meeting) return;
+    if (meeting.status !== 'transcribing' && meeting.status !== 'recording') return;
+
+    const pollInterval = setInterval(() => {
+      fetchMeetingDetail();
+    }, 3000);
+
+    return () => clearInterval(pollInterval);
+  }, [meeting?.status, meetingId]);
+
+  const handleExport = async (type) => {
+    try {
+      const url = `http://localhost:3001/api/meetings/${meetingId}/export?type=${type}`;
+      const res = await fetch(url);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err.error || 'Export failed');
+        return;
+      }
+      const blob = await res.blob();
+      const disposition = res.headers.get('Content-Disposition') || '';
+      const filenameMatch = disposition.match(/filename="([^"]+)"/);
+      const filename = filenameMatch ? filenameMatch[1] : `meeting_${type}.md`;
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = filename;
+      link.click();
+      URL.revokeObjectURL(link.href);
+    } catch (err) {
+      console.error('Export error:', err);
+      alert('Export failed. Please try again.');
+    }
+  };
 
   const fetchMeetingDetail = async () => {
     try {
@@ -661,16 +688,28 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
                   Transcribing ({meeting.progress || 10}%)
                 </div>
               ) : (
-                meeting.audio_path && (
-                  <button
-                    onClick={() => setShowEngineModal(true)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600/15 hover:bg-indigo-600/25 border border-indigo-500/25 text-indigo-300 hover:text-white text-xs font-semibold transition cursor-pointer shrink-0"
-                    title="Transkrip Ulang / Ganti Engine Transkripsi"
-                  >
-                    <RefreshCw size={12} />
-                    <span>Re-Transkrip / Ganti Engine</span>
-                  </button>
-                )
+                <div className="flex items-center gap-2">
+                  {meeting.segments && meeting.segments.length > 0 && (
+                    <button
+                      onClick={() => handleExport('transcript')}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-white/70 hover:text-white transition-colors"
+                      title="Download transcript as Markdown"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      Export
+                    </button>
+                  )}
+                  {meeting.audio_path && (
+                    <button
+                      onClick={() => setShowEngineModal(true)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600/15 hover:bg-indigo-600/25 border border-indigo-500/25 text-indigo-300 hover:text-white text-xs font-semibold transition cursor-pointer shrink-0"
+                      title="Transkrip Ulang / Ganti Engine Transkripsi"
+                    >
+                      <RefreshCw size={12} />
+                      <span>Re-Transkrip / Ganti Engine</span>
+                    </button>
+                  )}
+                </div>
               )}
             </div>
 
@@ -981,12 +1020,21 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
                       <Sparkles size={9} />
                       AI Generated
                     </span>
-                    <button
-                      onClick={() => handleCopySummary(currentSummary.content)}
-                      className="p-1.5 hover:bg-white/5 text-gray-500 hover:text-white border border-transparent hover:border-white/5 rounded-lg transition flex items-center gap-1.5 text-[10px] font-semibold cursor-pointer"
-                    >
-                      {copySuccess ? 'Copied!' : <><Copy size={11} /> Copy</>}
-                    </button>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => handleExport('summary')}
+                        className="p-1.5 hover:bg-white/5 text-gray-500 hover:text-white border border-transparent hover:border-white/5 rounded-lg transition flex items-center gap-1.5 text-[10px] font-semibold cursor-pointer"
+                        title="Download summary as Markdown"
+                      >
+                        <Download size={11} /> Export
+                      </button>
+                      <button
+                        onClick={() => handleCopySummary(currentSummary.content)}
+                        className="p-1.5 hover:bg-white/5 text-gray-500 hover:text-white border border-transparent hover:border-white/5 rounded-lg transition flex items-center gap-1.5 text-[10px] font-semibold cursor-pointer"
+                      >
+                        {copySuccess ? 'Copied!' : <><Copy size={11} /> Copy</>}
+                      </button>
+                    </div>
                   </div>
                   
                   {/* Render Summary content as simplified markdown representation */}

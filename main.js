@@ -233,8 +233,25 @@ function createTray() {
 // Boot setup
 app.whenReady().then(async () => {
   if (session && session.defaultSession) {
+    // Whitelist only the permissions MeetingScribe legitimately needs:
+    // - 'media' / 'microphone': getUserMedia for mic recording
+    // - 'display-capture': getDisplayMedia for system audio (tab/screen capture)
+    // - 'mediaKeySystem': required by some audio APIs
+    const ALLOWED_PERMISSIONS = new Set([
+      'media',
+      'microphone',
+      'camera',
+      'display-capture',
+      'mediaKeySystem',
+      'notifications',
+    ]);
     session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
-      callback(true);
+      if (ALLOWED_PERMISSIONS.has(permission)) {
+        callback(true);
+      } else {
+        console.warn(`[Electron] Denied unexpected permission request: "${permission}"`);
+        callback(false);
+      }
     });
   }
 

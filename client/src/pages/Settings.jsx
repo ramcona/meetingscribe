@@ -14,6 +14,7 @@ export default function Settings() {
   const [permissionStatus, setPermissionStatus] = useState('prompt'); // 'granted' | 'denied' | 'prompt'
 
   const [transcriptionEngine, setTranscriptionEngine] = useState('auto'); // 'auto' | 'gemini' | 'local_whisper'
+  const [whisperLanguage, setWhisperLanguage] = useState('auto'); // 'auto' | 'id' | 'en' | 'ja' | 'ko' | 'zh'
 
   const [googleCalendarUrl, setGoogleCalendarUrl] = useState('');
   const [googleApiKey, setGoogleApiKey] = useState('');
@@ -150,6 +151,9 @@ export default function Settings() {
         if (data.transcription_engine) {
           setTranscriptionEngine(data.transcription_engine);
         }
+        if (data.whisper_language) {
+          setWhisperLanguage(data.whisper_language);
+        }
         if (data.google_calendar_ical_url) {
           setGoogleCalendarUrl(data.google_calendar_ical_url);
         }
@@ -242,6 +246,7 @@ export default function Settings() {
     try {
       const payload = {
         transcription_engine: transcriptionEngine,
+        whisper_language: whisperLanguage,
         google_calendar_ical_url: googleCalendarUrl.trim()
       };
       if (apiKey.trim()) {
@@ -348,6 +353,28 @@ export default function Settings() {
                 </select>
                 <p className="text-[11px] text-gray-500 leading-relaxed">
                   Mode <strong>whisper.cpp</strong> berjalan sepenuhnya di komputer lokal Anda tanpa membutuhkan koneksi internet atau kuota API.
+                </p>
+              </div>
+
+              {/* Whisper Language Choice */}
+              <div className="space-y-2">
+                <label className="block text-xs font-mono text-gray-400 uppercase tracking-wider">
+                  Bahasa Default Local Whisper
+                </label>
+                <select
+                  value={whisperLanguage}
+                  onChange={(e) => setWhisperLanguage(e.target.value)}
+                  className="w-full bg-black/40 border border-white/10 focus:border-indigo-500/50 rounded-xl px-4 py-3 text-xs text-white focus:outline-none transition cursor-pointer"
+                >
+                  <option value="auto">Auto-detect (Otomatis)</option>
+                  <option value="id">Bahasa Indonesia (id)</option>
+                  <option value="en">English (en)</option>
+                  <option value="ja">Japanese / 日本語 (ja)</option>
+                  <option value="zh">Chinese / 中文 (zh)</option>
+                  <option value="ko">Korean / 한국어 (ko)</option>
+                </select>
+                <p className="text-[11px] text-gray-500 leading-relaxed">
+                  Bahasa yang digunakan oleh engine local whisper saat mentranskripsikan audio offline.
                 </p>
               </div>
 

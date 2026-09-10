@@ -20,15 +20,17 @@ export function getAudioDuration(filePath) {
       return resolve(0);
     }
 
+    const TIMEOUT_MS = 15000; // 15-second hard limit per probe attempt
+
     // 1. Try ffprobe container header first (fast)
-    execFile('ffprobe', ['-i', filePath, '-show_entries', 'format=duration', '-v', 'quiet', '-of', 'csv=p=0'], (err, stdout) => {
+    const probeProc = execFile('ffprobe', ['-i', filePath, '-show_entries', 'format=duration', '-v', 'quiet', '-of', 'csv=p=0'], (err, stdout) => {
       const headerDur = parseFloat(stdout ? stdout.trim() : '');
       if (!err && !isNaN(headerDur) && headerDur > 0) {
         return resolve(headerDur);
       }
 
       // 2. Fallback to ffmpeg stream decode (handles Chrome WebM without duration headers)
-      execFile('ffmpeg', ['-i', filePath, '-f', 'null', '-'], (err2, stdout2, stderr2) => {
+      const decodeProc = execFile('ffmpeg', ['-i', filePath, '-f', 'null', '-'], (err2, stdout2, stderr2) => {
         if (stderr2) {
           const matches = [...stderr2.matchAll(/time=(\d+):(\d+):(\d+(?:\.\d+)?)/g)];
           if (matches.length > 0) {
@@ -44,7 +46,23 @@ export function getAudioDuration(filePath) {
         }
         resolve(0);
       });
+
+      const decodeTimer = setTimeout(() => {
+        try { decodeProc.kill(); } catch (e) {}
+        console.warn('[AudioUtils] ffmpeg decode timed out for:', filePath);
+        resolve(0);
+      }, TIMEOUT_MS);
+
+      decodeProc.on('close', () => clearTimeout(decodeTimer));
     });
+
+    const probeTimer = setTimeout(() => {
+      try { probeProc.kill(); } catch (e) {}
+      console.warn('[AudioUtils] ffprobe timed out for:', filePath);
+      resolve(0);
+    }, TIMEOUT_MS);
+
+    probeProc.on('close', () => clearTimeout(probeTimer));
   });
 }
 

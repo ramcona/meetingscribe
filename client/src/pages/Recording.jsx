@@ -6,6 +6,7 @@ import {
 import { useRecording } from '../context/RecordingContext';
 import VUMeter from '../components/VUMeter';
 import WhisperSetupModal from '../components/WhisperSetupModal';
+import TestAudioButton from '../components/TestAudioButton';
 
 export default function Recording({ meetingId, onBack, onRecordingUploaded }) {
   const [meeting, setMeeting] = useState(null);
@@ -499,6 +500,16 @@ export default function Recording({ meetingId, onBack, onRecordingUploaded }) {
                 </div>
               )}
             </div>
+            
+            {/* TEST AUDIO WIDGET */}
+            {!isRecording && (
+              <TestAudioButton 
+                micId={micId}
+                systemId={systemId}
+                useTabCapture={useTabCapture}
+                disabled={isRecording || uploading}
+              />
+            )}
           </div>
 
           {/* NEW: Live Transcript (Beta) Real-Time Panel */}

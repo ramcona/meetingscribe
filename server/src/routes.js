@@ -169,15 +169,30 @@ router.get('/whisper-setup', async (req, res) => {
   }
 });
 
+// Per-request in-flight guard: drops chunk if previous one is still processing
+let liveChunkInFlight = false;
+
 // POST /api/live-whisper-chunk – live real-time transcription
 router.post('/live-whisper-chunk', memoryUpload.single('audio_chunk'), async (req, res) => {
   try {
     if (!req.file || !req.file.buffer) {
       return res.status(400).json({ error: 'No audio chunk provided' });
     }
-    const text = await transcribeChunkLocalWhisper(req.file.buffer);
-    res.json({ text: text || '' });
+
+    // If previous chunk is still being processed, drop this one to prevent queue buildup
+    if (liveChunkInFlight) {
+      return res.json({ text: '', dropped: true });
+    }
+
+    liveChunkInFlight = true;
+    try {
+      const text = await transcribeChunkLocalWhisper(req.file.buffer);
+      res.json({ text: text || '' });
+    } finally {
+      liveChunkInFlight = false;
+    }
   } catch (error) {
+    liveChunkInFlight = false;
     console.error('Error processing live whisper chunk:', error);
     res.status(500).json({ error: 'Failed to transcribe chunk' });
   }
@@ -438,11 +453,13 @@ router.get('/settings', (req, res) => {
     const engine = dbHelpers.getSetting('transcription_engine') || 'auto';
     const icalUrl = dbHelpers.getSetting('google_calendar_ical_url') || '';
     const googleApiKey = dbHelpers.getSetting('google_api_key') || '';
+    const whisperLanguage = dbHelpers.getSetting('whisper_language') || 'auto';
     res.json({
       gemini_api_key_set: !!apiKey,
       transcription_engine: engine,
       google_calendar_ical_url: icalUrl,
       google_api_key_set: !!googleApiKey,
+      whisper_language: whisperLanguage,
       app_name: process.env.APP_NAME || 'MeetingScribe'
     });
   } catch (error) {
@@ -453,7 +470,7 @@ router.get('/settings', (req, res) => {
 
 // 12. Save settings
 router.post('/settings', (req, res) => {
-  const { gemini_api_key, transcription_engine, google_calendar_ical_url, google_api_key } = req.body;
+  const { gemini_api_key, transcription_engine, google_calendar_ical_url, google_api_key, whisper_language } = req.body;
   try {
     if (gemini_api_key !== undefined) {
       dbHelpers.setSetting('gemini_api_key', gemini_api_key);
@@ -466,6 +483,9 @@ router.post('/settings', (req, res) => {
     }
     if (google_api_key !== undefined) {
       dbHelpers.setSetting('google_api_key', google_api_key);
+    }
+    if (whisper_language !== undefined) {
+      dbHelpers.setSetting('whisper_language', whisper_language);
     }
     res.json({ message: 'Settings saved successfully' });
   } catch (error) {
@@ -720,6 +740,59 @@ router.get('/system-stats', async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch system stats' });
+  }
+});
+
+// 19. Export transcript or summary as Markdown file
+router.get('/meetings/:id/export', (req, res) => {
+  const { type } = req.query; // 'transcript' | 'summary'
+  try {
+    const meeting = dbHelpers.getMeeting(req.params.id);
+    if (!meeting) {
+      return res.status(404).json({ error: 'Meeting not found' });
+    }
+
+    let content = '';
+    let filename = '';
+    const safeName = (meeting.title || 'meeting').replace(/[^a-z0-9\-_]/gi, '_').slice(0, 50);
+    const dateStr = new Date(meeting.created_at).toISOString().split('T')[0];
+
+    if (type === 'transcript') {
+      filename = `${safeName}_${dateStr}_transcript.md`;
+      const segments = meeting.segments || [];
+      if (segments.length === 0) {
+        return res.status(400).json({ error: 'No transcript available' });
+      }
+      content = `# Transcript: ${meeting.title}\n`;
+      content += `**Client:** ${meeting.client || 'N/A'}  \n`;
+      content += `**Date:** ${dateStr}  \n`;
+      content += `**Duration:** ${Math.floor((meeting.duration_seconds || 0) / 60)}m ${(meeting.duration_seconds || 0) % 60}s  \n\n`;
+      content += `---\n\n`;
+      for (const seg of segments) {
+        const m = Math.floor(seg.start_time / 60).toString().padStart(2, '0');
+        const s = Math.floor(seg.start_time % 60).toString().padStart(2, '0');
+        const name = seg.speaker_name || seg.speaker_label;
+        content += `**[${m}:${s}] ${name}:** ${seg.text}\n\n`;
+      }
+    } else if (type === 'summary') {
+      filename = `${safeName}_${dateStr}_summary.md`;
+      const summaries = meeting.summaries || [];
+      if (summaries.length === 0) {
+        return res.status(400).json({ error: 'No summary available' });
+      }
+      // Return the most recent summary
+      const latest = summaries[0];
+      content = latest.content;
+    } else {
+      return res.status(400).json({ error: 'type must be "transcript" or "summary"' });
+    }
+
+    res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(content);
+  } catch (error) {
+    console.error('Error exporting meeting data:', error);
+    res.status(500).json({ error: 'Failed to export meeting data' });
   }
 });
 
