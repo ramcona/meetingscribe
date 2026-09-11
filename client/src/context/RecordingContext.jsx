@@ -44,6 +44,13 @@ export function RecordingProvider({ children }) {
 
   const shouldRestartRef = useRef(true);
 
+  // Notify Electron main process when recording starts/stops (updates tray icon and menu)
+  useEffect(() => {
+    if (window.electronAPI && window.electronAPI.notifyRecordingState) {
+      window.electronAPI.notifyRecordingState(isRecording);
+    }
+  }, [isRecording]);
+
   // 1. Local Whisper Real-Time Chunk Streaming Effect (100% Offline Local Machine)
   useEffect(() => {
     if (!isRecording || isPaused || !isLiveTranscriptEnabled || liveEngine !== 'whisper') {

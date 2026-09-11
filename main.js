@@ -1,6 +1,7 @@
 const { app, BrowserWindow, globalShortcut, Tray, Menu, session, systemPreferences, ipcMain, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const http = require('http');
 const { pathToFileURL } = require('url');
 
 // Load environment variables in Electron main process from server/.env if available
@@ -18,9 +19,103 @@ let tray = null;
 let loggerModule = null;
 let backendStarted = false;
 let backendError = null;
+let isRecordingActive = false; // Tracks recording state for tray UI updates
 
 // Determine if we are in development mode
 const isDev = process.env.NODE_ENV === 'development' || process.env.ELECTRON_DEV === 'true';
+
+// ─── Custom native App Menu (removes "Electron" branding) ────────────────────
+function buildAppMenu() {
+  const isMac = process.platform === 'darwin';
+  const template = [
+    ...(isMac ? [{
+      label: app.getName(),
+      submenu: [
+        { label: `About ${app.getName()}`, role: 'about' },
+        { type: 'separator' },
+        {
+          label: 'Preferences…',
+          accelerator: 'Command+,',
+          click: () => {
+            if (mainWindow) { mainWindow.show(); mainWindow.focus(); mainWindow.webContents.send('navigate-to', 'settings'); }
+          }
+        },
+        { type: 'separator' },
+        { role: 'services' },
+        { type: 'separator' },
+        { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' },
+        { type: 'separator' },
+        { role: 'quit' }
+      ]
+    }] : []),
+    {
+      label: 'File',
+      submenu: [
+        {
+          label: 'New Meeting',
+          accelerator: isMac ? 'Command+N' : 'Ctrl+N',
+          click: () => {
+            if (mainWindow) { mainWindow.show(); mainWindow.focus(); mainWindow.webContents.send('navigate-to', 'new-meeting'); }
+          }
+        },
+        { type: 'separator' },
+        isMac ? { role: 'close' } : { role: 'quit' }
+      ]
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' }, { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' }, { role: 'copy' }, { role: 'paste' },
+        ...(isMac ? [{ role: 'pasteAndMatchStyle' }] : []),
+        { role: 'selectAll' }
+      ]
+    },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' }, { role: 'forceReload' },
+        ...(isDev ? [{ role: 'toggleDevTools' }] : []),
+        { type: 'separator' },
+        { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' }
+      ]
+    },
+    {
+      label: 'Window',
+      submenu: [
+        { role: 'minimize' }, { role: 'zoom' },
+        ...(isMac ? [{ type: 'separator' }, { role: 'front' }] : [{ role: 'close' }])
+      ]
+    }
+  ];
+  return Menu.buildFromTemplate(template);
+}
+
+// ─── Backend readiness check (poll /api/ping before showing window) ───────────
+function waitForBackend(maxAttempts = 30, intervalMs = 500) {
+  return new Promise((resolve) => {
+    if (isDev) return resolve(); // Dev backend is started separately
+    let attempts = 0;
+    const check = () => {
+      attempts++;
+      const req = http.get('http://localhost:3001/api/ping', (res) => {
+        if (res.statusCode === 200) { console.log('[Electron] Backend is ready.'); resolve(); }
+        else retry();
+        res.resume();
+      });
+      req.on('error', retry);
+      req.setTimeout(400, () => { req.destroy(); retry(); });
+    };
+    const retry = () => {
+      if (attempts >= maxAttempts) { console.warn('[Electron] Backend timeout, showing window anyway.'); resolve(); }
+      else setTimeout(check, intervalMs);
+    };
+    check();
+  });
+}
 
 // Start the Express backend if we are in production
 async function startBackend() {
@@ -129,6 +224,12 @@ ipcMain.on('show-confirm', (event, message) => {
   event.returnValue = result === 0; // true if 'Ya', false if 'Batal'
 });
 
+// Renderer notifies main when recording starts/stops → update tray tooltip & menu
+ipcMain.on('recording-state-changed', (_event, recording) => {
+  isRecordingActive = !!recording;
+  rebuildTrayMenu();
+});
+
 
 // Set application name for desktop OS integrations
 app.setName('MeetingScribe');
@@ -137,11 +238,15 @@ function createWindow() {
   const iconPath = path.join(__dirname, 'icon.png');
 
   mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
+    width: 1280,
+    height: 850,
+    minWidth: 900,
+    minHeight: 600,
     title: 'MeetingScribe',
     icon: iconPath,
     backgroundColor: '#0A0A0B',
+    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
+    trafficLightPosition: { x: 18, y: 20 },
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -169,61 +274,122 @@ function createWindow() {
     mainWindow.loadFile(htmlPath);
   }
 
+  // On macOS: hide to tray instead of quitting when window X is clicked
+  mainWindow.on('close', (e) => {
+    if (process.platform === 'darwin' && !app.isQuitting) {
+      e.preventDefault();
+      mainWindow.hide();
+      rebuildTrayMenu();
+    }
+  });
+
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
 }
 
 // Create the macOS Menu Bar Tray Icon
+function rebuildTrayMenu() {
+  if (!tray) return;
+
+  const isVisible = mainWindow && mainWindow.isVisible();
+  const recordingLabel = isRecordingActive ? '🔴 Recording in progress...' : '⏺  Quick Record (Cmd+Shift+R)';
+
+  const contextMenu = Menu.buildFromTemplate([
+    { label: 'MeetingScribe', enabled: false },
+    { type: 'separator' },
+    {
+      label: isVisible ? 'Hide Window' : 'Show Window',
+      click: () => {
+        if (mainWindow) {
+          if (mainWindow.isVisible() && mainWindow.isFocused()) {
+            mainWindow.hide();
+          } else {
+            mainWindow.show();
+            mainWindow.focus();
+          }
+        } else {
+          createWindow();
+        }
+      }
+    },
+    { type: 'separator' },
+    {
+      label: recordingLabel,
+      enabled: !isRecordingActive,
+      click: () => {
+        if (mainWindow) {
+          mainWindow.show();
+          mainWindow.focus();
+          mainWindow.webContents.send('global-shortcut-record');
+        } else {
+          createWindow();
+        }
+      }
+    },
+    {
+      label: 'Meetings Dashboard',
+      click: () => {
+        if (mainWindow) { mainWindow.show(); mainWindow.focus(); mainWindow.webContents.send('navigate-to', 'dashboard'); }
+        else createWindow();
+      }
+    },
+    {
+      label: 'Settings',
+      click: () => {
+        if (mainWindow) { mainWindow.show(); mainWindow.focus(); mainWindow.webContents.send('navigate-to', 'settings'); }
+        else createWindow();
+      }
+    },
+    { type: 'separator' },
+    {
+      label: 'Quit MeetingScribe',
+      accelerator: process.platform === 'darwin' ? 'Command+Q' : 'Alt+F4',
+      click: () => {
+        app.isQuitting = true;
+        app.quit();
+      }
+    }
+  ]);
+
+  tray.setContextMenu(contextMenu);
+  tray.setToolTip(isRecordingActive ? 'MeetingScribe — 🔴 Recording active' : 'MeetingScribe — Click to show');
+}
+
 function createTray() {
-  const iconPath = path.join(__dirname, 'iconTemplate.png');
-  
-  // Write a simple black microphone silhouette as a base64 template image if it doesn't exist
-  if (!fs.existsSync(iconPath)) {
+  const templateIconPath = path.join(__dirname, 'iconTemplate.png');
+
+  // Write the template icon if it doesn't exist
+  if (!fs.existsSync(templateIconPath)) {
     const iconBase64 = 'iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAZklEQVR42t2SAQ4AIAgD7f+f7R5Gg5wzdIYg0BqKiMhr6U0F4Cq4zK64DIBN2A34hH2An1ACeP4kMBKQA3bAGbAD1sAFSAOugBkwBy7AGpCDW4AEpID/X2R1f6q6F9W9VvW32i/YAH9bT29qLAAAAABJRU5ErkJggg==';
     try {
-      fs.writeFileSync(iconPath, Buffer.from(iconBase64, 'base64'));
+      fs.writeFileSync(templateIconPath, Buffer.from(iconBase64, 'base64'));
       console.log('[Electron] Created tray template icon file');
     } catch (err) {
       console.error('[Electron] Failed to write tray icon:', err);
     }
   }
 
+  const iconPath = fs.existsSync(templateIconPath) ? templateIconPath : path.join(__dirname, 'icon.png');
+
   try {
     tray = new Tray(iconPath);
-    const contextMenu = Menu.buildFromTemplate([
-      { label: 'MeetingScribe', enabled: false },
-      { type: 'separator' },
-      { 
-        label: 'Show Application Window', 
-        click: () => {
-          if (mainWindow) {
-            mainWindow.show();
-            mainWindow.focus();
-          } else {
-            createWindow();
-          }
-        }
-      },
-      { 
-        label: 'Quick Record / Toggle', 
-        click: () => {
-          if (mainWindow) {
-            mainWindow.webContents.send('global-shortcut-record');
-          }
-        }
-      },
-      { type: 'separator' },
-      { 
-        label: 'Quit', 
-        click: () => {
-          app.quit();
-        }
-      }
-    ]);
 
-    tray.setToolTip('MeetingScribe - Local-First Audio Recorder');
-    tray.setContextMenu(contextMenu);
+    // Single click → toggle window visibility
+    tray.on('click', () => {
+      if (mainWindow) {
+        if (mainWindow.isVisible() && mainWindow.isFocused()) {
+          mainWindow.hide();
+        } else {
+          mainWindow.show();
+          mainWindow.focus();
+        }
+      } else {
+        createWindow();
+      }
+    });
+
+    rebuildTrayMenu();
     console.log('[Electron] macOS Menu Bar Tray initialized');
   } catch (err) {
     console.error('[Electron] Failed to initialize Tray:', err);
@@ -232,6 +398,18 @@ function createTray() {
 
 // Boot setup
 app.whenReady().then(async () => {
+  // Set About panel details (replaces "Electron" in the About dialog)
+  app.setAboutPanelOptions({
+    applicationName: 'MeetingScribe',
+    applicationVersion: app.getVersion() || '1.0.0',
+    version: `Electron ${process.versions.electron} · Node ${process.versions.node}`,
+    copyright: '© 2025 MeetingScribe. Local-First Meeting Recorder.',
+    iconPath: path.join(__dirname, 'icon.png')
+  });
+
+  // Install custom app menu (removes default "Electron" menu)
+  Menu.setApplicationMenu(buildAppMenu());
+
   if (session && session.defaultSession) {
     // Whitelist only the permissions MeetingScribe legitimately needs:
     // - 'media' / 'microphone': getUserMedia for mic recording
@@ -271,7 +449,10 @@ app.whenReady().then(async () => {
     }
   }
 
+  // Start backend, wait until it responds, THEN show window (fixes blank/broken UI on launch)
   await startBackend();
+  await waitForBackend();
+
   createWindow();
   createTray();
 
@@ -280,25 +461,33 @@ app.whenReady().then(async () => {
   globalShortcut.register(shortcut, () => {
     console.log('[Electron] Global shortcut triggered!');
     if (mainWindow) {
+      mainWindow.show();
+      mainWindow.focus();
       mainWindow.webContents.send('global-shortcut-record');
     }
   });
 
+  // macOS: clicking the dock icon should re-show the window if hidden
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
+    if (mainWindow) {
+      mainWindow.show();
+      mainWindow.focus();
+    } else {
       createWindow();
     }
   });
 });
 
-// Quit when all windows are closed, except on macOS
+// On macOS the app stays running when all windows are closed (lives in menu bar tray)
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
   }
 });
 
-// Clean up background subprocesses on quit
+// Clean up on quit
 app.on('will-quit', () => {
+  app.isQuitting = true;
   globalShortcut.unregisterAll();
 });
+

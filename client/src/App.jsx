@@ -25,6 +25,7 @@ export default function App() {
         }
       })
       .catch(err => console.error('Error fetching app name:', err));
+
     const fetchActiveEngine = () => {
       fetch('http://localhost:3001/api/active-engine')
         .then(r => r.json())
@@ -35,7 +36,27 @@ export default function App() {
     fetchActiveEngine();
     const engineInterval = setInterval(fetchActiveEngine, 3000);
 
-    return () => clearInterval(engineInterval);
+    // Listen for navigate-to events from tray / native menu
+    let unsubNavigate;
+    if (window.electronAPI && window.electronAPI.onNavigateTo) {
+      unsubNavigate = window.electronAPI.onNavigateTo((target) => {
+        if (target === 'settings') {
+          setPage('settings');
+        } else if (target === 'dashboard') {
+          setPage('dashboard');
+        } else if (target === 'new-meeting') {
+          // Trigger the new meeting flow via dashboard
+          setPage('dashboard');
+          // Small delay to let dashboard mount before we auto-click
+          setTimeout(() => setPage('recording'), 50);
+        }
+      });
+    }
+
+    return () => {
+      clearInterval(engineInterval);
+      if (unsubNavigate) unsubNavigate();
+    };
   }, []);
 
   const handleSelectMeeting = (id, status) => {
