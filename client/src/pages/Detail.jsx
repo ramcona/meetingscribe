@@ -43,6 +43,11 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
   const [editingSpeakerList, setEditingSpeakerList] = useState(null);
   const [renameListInput, setRenameListInput] = useState('');
 
+  // Meeting title inline edit states
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [titleInput, setTitleInput] = useState('');
+  const [isSavingTitle, setIsSavingTitle] = useState(false);
+
   // Custom audio player states
   const audioRef = useRef(null);
   const transcriptContainerRef = useRef(null);
@@ -219,6 +224,36 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
       }
     } catch (err) {
       console.error('Error renaming speaker from list:', err);
+    }
+  };
+
+  const handleStartEditTitle = () => {
+    setTitleInput(meeting?.title || '');
+    setIsEditingTitle(true);
+  };
+
+  const handleSaveTitle = async () => {
+    const trimmed = titleInput.trim();
+    if (!trimmed || trimmed === meeting?.title) {
+      setIsEditingTitle(false);
+      return;
+    }
+
+    setIsSavingTitle(true);
+    try {
+      const res = await fetch(`http://localhost:3001/api/meetings/${meetingId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: trimmed })
+      });
+      if (res.ok) {
+        setMeeting(prev => prev ? { ...prev, title: trimmed } : null);
+      }
+    } catch (err) {
+      console.error('Failed to update meeting title:', err);
+    } finally {
+      setIsSavingTitle(false);
+      setIsEditingTitle(false);
     }
   };
 
@@ -450,7 +485,58 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
                 </span>
               )}
             </div>
-            <h1 className="text-2xl font-bold text-white tracking-tight leading-snug">{meeting.title}</h1>
+
+            {/* Meeting Title with inline rename */}
+            {isEditingTitle ? (
+              <div className="flex items-center gap-2 pt-1">
+                <input
+                  type="text"
+                  value={titleInput}
+                  onChange={(e) => setTitleInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleSaveTitle();
+                    if (e.key === 'Escape') setIsEditingTitle(false);
+                  }}
+                  autoFocus
+                  className="bg-black/60 border border-indigo-500/50 rounded-xl px-3.5 py-1.5 text-xl font-bold text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30 w-full max-w-xl shadow-inner"
+                  placeholder="Judul Meeting..."
+                  disabled={isSavingTitle}
+                />
+                <button
+                  onClick={handleSaveTitle}
+                  disabled={isSavingTitle}
+                  className="p-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white transition cursor-pointer shadow-md shadow-indigo-600/20"
+                  title="Simpan Judul (Enter)"
+                >
+                  <Check size={16} />
+                </button>
+                <button
+                  onClick={() => setIsEditingTitle(false)}
+                  disabled={isSavingTitle}
+                  className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white transition cursor-pointer"
+                  title="Batal (Esc)"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2.5 group/title">
+                <h1 
+                  onClick={handleStartEditTitle}
+                  className="text-2xl font-bold text-white tracking-tight leading-snug hover:text-indigo-300 transition cursor-pointer"
+                  title="Klik untuk mengubah nama meeting"
+                >
+                  {meeting.title}
+                </h1>
+                <button
+                  onClick={handleStartEditTitle}
+                  className="p-1.5 rounded-lg text-gray-500 hover:text-indigo-400 hover:bg-white/5 transition opacity-0 group-hover/title:opacity-100 cursor-pointer"
+                  title="Ubah nama meeting"
+                >
+                  <Edit2 size={15} />
+                </button>
+              </div>
+            )}
             {meeting.description && <p className="text-xs text-gray-400 leading-relaxed max-w-2xl">{meeting.description}</p>}
           </div>
 
