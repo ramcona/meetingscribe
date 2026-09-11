@@ -44,7 +44,7 @@ function buildAppMenu() {
               type: 'info',
               title: `About ${appName}`,
               message: appName,
-              detail: `Versi 1.0.0 (Local-First)\nAI Meeting Recorder, Transcriber & Summarizer\n\n© 2025 MeetingScribe · powered by technice.id`,
+              detail: `Versi 1.0.0\nAI Meeting Recorder, Transcriber & Summarizer\n\n© 2025 MeetingScribe · powered by technice.id`,
               icon: fs.existsSync(iconPath) ? iconPath : undefined,
               buttons: ['Tutup']
             });
@@ -419,7 +419,7 @@ app.whenReady().then(async () => {
     applicationName: 'MeetingScribe',
     applicationVersion: app.getVersion() || '1.0.0',
     version: `Electron ${process.versions.electron} · Node ${process.versions.node}`,
-    copyright: '© 2025 MeetingScribe. Local-First Meeting Recorder.',
+    copyright: '© 2025 MeetingScribe · powered by technice.id',
     iconPath: path.join(__dirname, 'icon.png')
   });
 
