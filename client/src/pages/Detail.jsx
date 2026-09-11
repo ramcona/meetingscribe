@@ -48,6 +48,9 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
   const [titleInput, setTitleInput] = useState('');
   const [isSavingTitle, setIsSavingTitle] = useState(false);
 
+  // Chapter description expansion state
+  const [expandedChapters, setExpandedChapters] = useState({});
+
   // Custom audio player states
   const audioRef = useRef(null);
   const transcriptContainerRef = useRef(null);
@@ -645,29 +648,77 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
 
               {meeting.chapters && meeting.chapters.length > 0 ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {meeting.chapters.map((chap, cIdx) => (
-                    <div
-                      key={chap.id || cIdx}
-                      onClick={() => handleSegmentClick(chap.start_time)}
-                      className="bg-black/40 hover:bg-amber-950/20 border border-white/5 hover:border-amber-500/30 rounded-2xl p-3.5 space-y-1.5 transition cursor-pointer group"
-                      title="Klik untuk memutar audio bab ini"
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-[10px] font-mono text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full font-semibold">
-                          Bab {cIdx + 1} • {formatDuration(chap.start_time)}
-                        </span>
-                        <Play size={12} className="text-amber-400 opacity-0 group-hover:opacity-100 transition" />
+                  {meeting.chapters.map((chap, cIdx) => {
+                    const isExpanded = !!expandedChapters[chap.id || cIdx];
+                    const nextChapStart = meeting.chapters[cIdx + 1]?.start_time;
+                    const isChapActive = currentTime >= chap.start_time && (
+                      chap.end_time 
+                        ? currentTime < chap.end_time 
+                        : (nextChapStart ? currentTime < nextChapStart : true)
+                    );
+
+                    return (
+                      <div
+                        key={chap.id || cIdx}
+                        onClick={() => handleSegmentClick(chap.start_time)}
+                        className={`rounded-2xl p-3.5 space-y-2 transition-all duration-300 cursor-pointer group ${
+                          isChapActive
+                            ? 'bg-amber-950/30 border-amber-500/60 ring-1 ring-amber-500/40 shadow-lg shadow-amber-500/15'
+                            : 'bg-black/40 hover:bg-amber-950/20 border border-white/5 hover:border-amber-500/30'
+                        }`}
+                        title="Klik untuk memutar audio bab ini"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full font-semibold transition ${
+                            isChapActive
+                              ? 'text-black bg-amber-400 font-bold shadow-sm shadow-amber-400/30'
+                              : 'text-amber-400 bg-amber-500/10'
+                          }`}>
+                            Bab {cIdx + 1} • {formatDuration(chap.start_time)}
+                          </span>
+                          <div className="flex items-center gap-1.5">
+                            {isChapActive && isPlaying ? (
+                              <Volume2 size={13} className="text-amber-400 animate-pulse" />
+                            ) : (
+                              <Play size={12} className={`text-amber-400 transition ${isChapActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`} />
+                            )}
+                          </div>
+                        </div>
+
+                        <h4 className={`text-xs font-bold leading-snug transition ${
+                          isChapActive ? 'text-amber-300 font-extrabold' : 'text-white group-hover:text-amber-300'
+                        }`}>
+                          {chap.title}
+                        </h4>
+
+                        {chap.summary && (
+                          <div className="space-y-1">
+                            <p className={`text-[11px] leading-relaxed font-sans transition ${
+                              isChapActive ? 'text-amber-100/90' : 'text-gray-400'
+                            } ${isExpanded ? '' : 'line-clamp-2'}`}>
+                              {chap.summary}
+                            </p>
+                            {chap.summary.length > 70 && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setExpandedChapters(prev => ({
+                                    ...prev,
+                                    [chap.id || cIdx]: !prev[chap.id || cIdx]
+                                  }));
+                                }}
+                                className="text-[10px] font-semibold text-amber-400/90 hover:text-amber-300 transition-colors cursor-pointer flex items-center gap-0.5 pt-0.5"
+                              >
+                                <span>{isExpanded ? 'Tutup Ringkasan' : 'Lihat Selengkapnya'}</span>
+                                <span className="text-[9px]">{isExpanded ? '▴' : '▾'}</span>
+                              </button>
+                            )}
+                          </div>
+                        )}
                       </div>
-                      <h4 className="text-xs font-bold text-white group-hover:text-amber-300 transition leading-snug">
-                        {chap.title}
-                      </h4>
-                      {chap.summary && (
-                        <p className="text-[11px] text-gray-400 leading-normal line-clamp-2">
-                          {chap.summary}
-                        </p>
-                      )}
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="text-center py-4 text-xs text-gray-500 font-sans">
