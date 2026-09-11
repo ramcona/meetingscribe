@@ -291,10 +291,12 @@ export async function transcribeChunkLocalWhisper(audioBuffer) {
     await convertAudioToWav(tempChunkPath, tempWavPath);
     const audioData = readWavAudioToFloat32Array(tempWavPath);
 
+    const whisperLang = dbHelpers.getSetting('whisper_language') || 'auto';
     const transcriber = await getWhisperPipeline('Xenova/whisper-tiny');
     const output = await transcriber(audioData, {
       chunk_length_s: 10,
-      return_timestamps: false
+      return_timestamps: false,
+      language: whisperLang === 'auto' ? undefined : whisperLang
     });
 
     const text = (output.text || '').trim();

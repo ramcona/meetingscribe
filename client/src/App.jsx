@@ -7,7 +7,6 @@ import Detail from './pages/Detail';
 import Settings from './pages/Settings';
 import { RecordingProvider } from './context/RecordingContext';
 import FloatingRecordingBar from './components/FloatingRecordingBar';
-import SystemStats from './components/SystemStats';
 
 export default function App() {
   const [page, setPage] = useState('dashboard');

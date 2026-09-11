@@ -40,10 +40,15 @@ export default function Dashboard({ onSelectMeeting, onCreateNew }) {
   const [isCalendarModalOpen, setIsCalendarModalOpen] = useState(false);
   const [calendarEvents, setCalendarEvents] = useState([]);
   const [loadingCalendar, setLoadingCalendar] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
     fetchMeetings();
   }, []);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filterType, search]);
 
   const fetchCalendarEvents = async () => {
     setLoadingCalendar(true);
@@ -216,6 +221,13 @@ export default function Dashboard({ onSelectMeeting, onCreateNew }) {
     return m.meeting_type === filterType;
   });
 
+  const ITEMS_PER_PAGE = 8;
+  const totalPages = Math.ceil(displayMeetings.length / ITEMS_PER_PAGE);
+  const paginatedMeetings = displayMeetings.slice(
+    (currentPage - 1) * ITEMS_PER_PAGE,
+    currentPage * ITEMS_PER_PAGE
+  );
+
   const getStatusBadge = (status) => {
     switch (status) {
       case 'recording':
@@ -346,85 +358,137 @@ export default function Dashboard({ onSelectMeeting, onCreateNew }) {
           </div>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {displayMeetings.map((meeting) => (
-            <div
-              key={meeting.id}
-              onClick={() => onSelectMeeting(meeting.id, meeting.status)}
-              className="bg-[#111113] hover:bg-[#151517] border border-white/5 hover:border-white/10 rounded-2xl p-5 flex flex-col justify-between gap-4 transition group cursor-pointer"
-            >
-              <div className="space-y-3">
-                <div className="flex items-start justify-between gap-2">
-                  <h3 className="font-semibold text-white group-hover:text-indigo-400 transition leading-snug">
-                    {meeting.title}
-                  </h3>
-                  {getStatusBadge(meeting.status)}
-                </div>
-                
-                {meeting.description && (
-                  <p className="text-xs text-gray-400 line-clamp-2 leading-relaxed">
-                    {meeting.description}
-                  </p>
-                )}
-
-                {/* Matching Transcript Snippets Display */}
-                {meeting.matching_snippets && meeting.matching_snippets.length > 0 && (
-                  <div className="bg-black/40 border border-white/5 rounded-xl p-3 space-y-1.5 text-xs">
-                    <div className="text-[10px] font-mono text-indigo-400 uppercase tracking-wider flex items-center gap-1">
-                      <Search size={10} /> Matching Transcript Snippets ({meeting.matching_snippets.length})
-                    </div>
-                    {meeting.matching_snippets.map((snip, sIdx) => (
-                      <div key={sIdx} className="text-gray-300 leading-normal flex items-start gap-1.5 font-sans">
-                        <span className="text-[10px] font-mono text-indigo-300 shrink-0 bg-indigo-500/10 px-1 py-0.5 rounded">
-                          {formatDuration(snip.start_time)}
-                        </span>
-                        <span className="truncate">
-                          <strong className="text-white font-semibold">{snip.speaker_name || snip.speaker_label}:</strong> {snip.text}
-                        </span>
-                      </div>
-                    ))}
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {paginatedMeetings.map((meeting) => (
+              <div
+                key={meeting.id}
+                onClick={() => onSelectMeeting(meeting.id, meeting.status)}
+                className="bg-[#111113] hover:bg-[#151517] border border-white/5 hover:border-white/10 rounded-2xl p-5 flex flex-col justify-between gap-4 transition group cursor-pointer"
+              >
+                <div className="space-y-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <h3 className="font-semibold text-white group-hover:text-indigo-400 transition leading-snug">
+                      {meeting.title}
+                    </h3>
+                    {getStatusBadge(meeting.status)}
                   </div>
-                )}
-              </div>
-
-              <div className="border-t border-white/5 pt-4 flex items-center justify-between text-[11px] text-gray-500">
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 font-mono">
-                  {meeting.client && (
-                    <span className="flex items-center gap-1 text-gray-400 font-sans">
-                      <Users size={11} />
-                      {meeting.client}
-                    </span>
+                  
+                  {meeting.description && (
+                    <p className="text-xs text-gray-400 line-clamp-2 leading-relaxed">
+                      {meeting.description}
+                    </p>
                   )}
-                  <span className="flex items-center gap-1">
-                    <Calendar size={11} />
-                    {formatDate(meeting.created_at)}
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <Clock size={11} />
-                    {formatDuration(meeting.duration_seconds)}
-                  </span>
-                  <span className="flex items-center gap-1 uppercase">
-                    {meeting.meeting_type === 'online' ? (
-                      <><Video size={11} className="text-indigo-400" /> Online</>
-                    ) : (
-                      <><Mic size={11} className="text-purple-400" /> Offline</>
-                    )}
-                  </span>
+
+                  {/* Matching Transcript Snippets Display */}
+                  {meeting.matching_snippets && meeting.matching_snippets.length > 0 && (
+                    <div className="bg-black/40 border border-white/5 rounded-xl p-3 space-y-1.5 text-xs">
+                      <div className="text-[10px] font-mono text-indigo-400 uppercase tracking-wider flex items-center gap-1">
+                        <Search size={10} /> Matching Transcript Snippets ({meeting.matching_snippets.length})
+                      </div>
+                      {meeting.matching_snippets.map((snip, sIdx) => (
+                        <div key={sIdx} className="text-gray-300 leading-normal flex items-start gap-1.5 font-sans">
+                          <span className="text-[10px] font-mono text-indigo-300 shrink-0 bg-indigo-500/10 px-1 py-0.5 rounded">
+                            {formatDuration(snip.start_time)}
+                          </span>
+                          <span className="truncate">
+                            <strong className="text-white font-semibold">{snip.speaker_name || snip.speaker_label}:</strong> {snip.text}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={(e) => handleDelete(e, meeting.id)}
-                    className="p-1.5 hover:bg-red-500/10 text-gray-500 hover:text-red-400 border border-transparent hover:border-red-500/15 rounded-lg transition"
-                    title="Delete meeting"
-                  >
-                    <Trash2 size={13} />
-                  </button>
-                  <ChevronRight size={14} className="text-gray-600 group-hover:text-white transition group-hover:translate-x-0.5" />
+                <div className="border-t border-white/5 pt-4 flex items-center justify-between text-[11px] text-gray-500">
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 font-mono">
+                    {meeting.client && (
+                      <span className="flex items-center gap-1 text-gray-400 font-sans">
+                        <Users size={11} />
+                        {meeting.client}
+                      </span>
+                    )}
+                    <span className="flex items-center gap-1">
+                      <Calendar size={11} />
+                      {formatDate(meeting.created_at)}
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <Clock size={11} />
+                      {formatDuration(meeting.duration_seconds)}
+                    </span>
+                    <span className="flex items-center gap-1 uppercase">
+                      {meeting.meeting_type === 'online' ? (
+                        <><Video size={11} className="text-indigo-400" /> Online</>
+                      ) : (
+                        <><Mic size={11} className="text-purple-400" /> Offline</>
+                      )}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={(e) => handleDelete(e, meeting.id)}
+                      className="p-1.5 hover:bg-red-500/10 text-gray-500 hover:text-red-400 border border-transparent hover:border-red-500/15 rounded-lg transition"
+                      title="Delete meeting"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                    <ChevronRight size={14} className="text-gray-600 group-hover:text-white transition group-hover:translate-x-0.5" />
+                  </div>
                 </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Pagination Controls */}
+          {totalPages > 1 && (
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 px-1 border-t border-white/5">
+              <span className="text-[11px] text-gray-500 font-mono">
+                Menampilkan {((currentPage - 1) * ITEMS_PER_PAGE) + 1} - {Math.min(currentPage * ITEMS_PER_PAGE, displayMeetings.length)} dari {displayMeetings.length} meeting · Halaman {currentPage} dari {totalPages}
+              </span>
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                  className="px-3 py-1.5 text-xs font-medium text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 border border-white/5 rounded-lg transition disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  ← Sebelumnya
+                </button>
+                {Array.from({ length: totalPages }, (_, i) => i + 1)
+                  .filter(p => p === 1 || p === totalPages || Math.abs(p - currentPage) <= 1)
+                  .reduce((acc, p, idx, arr) => {
+                    if (idx > 0 && p - arr[idx - 1] > 1) acc.push('...');
+                    acc.push(p);
+                    return acc;
+                  }, [])
+                  .map((p, idx) =>
+                    p === '...' ? (
+                      <span key={`ellipsis-${idx}`} className="px-1.5 text-xs text-gray-600">…</span>
+                    ) : (
+                      <button
+                        key={p}
+                        onClick={() => setCurrentPage(p)}
+                        className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition cursor-pointer ${
+                          currentPage === p
+                            ? 'bg-indigo-600/20 border-indigo-500/30 text-indigo-400 font-semibold'
+                            : 'text-gray-500 hover:text-white bg-white/5 hover:bg-white/10 border-white/5'
+                        }`}
+                      >
+                        {p}
+                      </button>
+                    )
+                  )
+                }
+                <button
+                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                  disabled={currentPage === totalPages}
+                  className="px-3 py-1.5 text-xs font-medium text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 border border-white/5 rounded-lg transition disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  Selanjutnya →
+                </button>
               </div>
             </div>
-          ))}
+          )}
         </div>
       )}
 

@@ -85,14 +85,15 @@ export default function SystemStats() {
             <span className="text-[10px] font-mono text-gray-500 uppercase tracking-widest">RAM</span>
           </div>
           <span
-            className={`text-[10px] font-mono font-semibold tabular-nums transition-colors duration-500 ${
-              ram_pct >= 85 ? 'text-red-400' : ram_pct >= 60 ? 'text-amber-400' : 'text-emerald-400'
+            title={`Memori sistem: ${ramUsedGb} aktif & cache / ${ramTotalGb} total`}
+            className={`text-[10px] font-mono font-semibold tabular-nums transition-colors duration-500 cursor-help ${
+              ram_pct >= 95 ? 'text-amber-400' : 'text-emerald-400'
             }`}
           >
-            {ramUsedGb} / {ramTotalGb}
+            {ram_pct}%
           </span>
         </div>
-        <MiniBar pct={ram_pct} color={colorFor(ram_pct)} />
+        <MiniBar pct={ram_pct} color={ram_pct >= 95 ? 'bg-amber-400' : 'bg-emerald-400'} />
       </div>
     </div>
   );

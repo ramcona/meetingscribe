@@ -124,6 +124,12 @@ export function RecordingProvider({ children }) {
                     }
                   ]);
                 }
+              } else {
+                const errData = await res.json().catch(() => ({}));
+                console.warn('[LiveWhisper] Chunk error:', res.status, errData.error);
+                if (errData.error) {
+                  setLiveTranscriptError(errData.error);
+                }
               }
             } catch (err) {
               console.warn('[LiveWhisper] Chunk fetch error:', err);
@@ -171,7 +177,7 @@ export function RecordingProvider({ children }) {
 
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      setLiveTranscriptError('Web Speech API live transcript tidak didukung di environment ini.');
+      setLiveTranscriptError('Web Speech API live transcript tidak didukung di environment ini. Silakan pilih Local Whisper.');
       return;
     }
 
@@ -210,12 +216,15 @@ export function RecordingProvider({ children }) {
         console.warn('[LiveTranscript] SpeechRecognition error:', err.error);
         if (err.error === 'network') {
           shouldRestartRef.current = false;
-          setLiveTranscriptError('Koneksi Web Speech Google tidak tersedia di Electron environment ini. Live transcript dapat dicatat sebagai draft.');
+          setLiveTranscriptError('⚠️ Web Speech API tidak dapat terhubung ke server Google di mode desktop Electron. Silakan pilih "Local Whisper (100% Offline)" di atas.');
         } else if (err.error === 'not-allowed') {
           shouldRestartRef.current = false;
-          setLiveTranscriptError('Izin mikrofon untuk Live Speech Recognition ditolak.');
+          setLiveTranscriptError('Izin mikrofon untuk Live Speech Recognition belum diberikan.');
         } else if (err.error === 'no-speech') {
           // Normal timeout when quiet, allow restart
+        } else if (err.error === 'audio-capture') {
+          shouldRestartRef.current = false;
+          setLiveTranscriptError('Gagal menangkap audio mikrofon.');
         } else {
           setLiveTranscriptError(`Live speech recognition: ${err.error}`);
         }
