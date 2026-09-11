@@ -342,8 +342,25 @@ export default function Dashboard({ onSelectMeeting, onCreateNew }) {
 
       {/* Meetings Grid/List */}
       {loading ? (
-        <div className="h-64 flex items-center justify-center text-sm text-gray-500 font-mono">
-          Searching history...
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 animate-pulse">
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="bg-[#111113] border border-white/5 rounded-2xl p-5 space-y-4">
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <div className="h-4 bg-white/10 rounded-md w-1/2"></div>
+                  <div className="h-4 bg-white/5 rounded-full w-16"></div>
+                </div>
+                <div className="h-3 bg-white/5 rounded-md w-3/4"></div>
+              </div>
+              <div className="border-t border-white/5 pt-4 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="h-3 bg-white/5 rounded w-16"></div>
+                  <div className="h-3 bg-white/5 rounded w-12"></div>
+                </div>
+                <div className="h-4 w-4 bg-white/5 rounded"></div>
+              </div>
+            </div>
+          ))}
         </div>
       ) : displayMeetings.length === 0 ? (
         <div className="border border-dashed border-white/5 rounded-3xl h-64 flex flex-col items-center justify-center text-center p-6 space-y-3 bg-[#111113]/20">
