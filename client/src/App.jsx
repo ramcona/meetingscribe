@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, Settings as SettingsIcon, Cpu, Sparkles, Zap, Brain } from 'lucide-react';
+import { Calendar, Settings as SettingsIcon } from 'lucide-react';
 import logoImg from '../public/icon.png';
 import Dashboard from './pages/Dashboard';
 import Recording from './pages/Recording';
@@ -13,7 +13,6 @@ export default function App() {
   const [page, setPage] = useState('dashboard');
   const [selectedMeetingId, setSelectedMeetingId] = useState(null);
   const [appName, setAppName] = useState('MeetingScribe');
-  const [engineStatus, setEngineStatus] = useState(null);
 
   useEffect(() => {
     fetch('http://localhost:3001/api/settings')
@@ -26,36 +25,26 @@ export default function App() {
       })
       .catch(err => console.error('Error fetching app name:', err));
 
-    const fetchActiveEngine = () => {
-      fetch('http://localhost:3001/api/active-engine')
-        .then(r => r.json())
-        .then(setEngineStatus)
-        .catch(() => {});
-    };
-
-    fetchActiveEngine();
-    const engineInterval = setInterval(fetchActiveEngine, 3000);
-
-    // Listen for navigate-to events from tray / native menu
+    // Listen for navigate-to events from tray / native menu (Electron IPC)
     let unsubNavigate;
     if (window.electronAPI && window.electronAPI.onNavigateTo) {
       unsubNavigate = window.electronAPI.onNavigateTo((target) => {
-        if (target === 'settings') {
-          setPage('settings');
-        } else if (target === 'dashboard') {
-          setPage('dashboard');
-        } else if (target === 'new-meeting') {
-          // Trigger the new meeting flow via dashboard
-          setPage('dashboard');
-          // Small delay to let dashboard mount before we auto-click
-          setTimeout(() => setPage('recording'), 50);
-        }
+        if (target === 'settings') setPage('settings');
+        else if (target === 'dashboard') setPage('dashboard');
+        else if (target === 'new-meeting') { setPage('dashboard'); setTimeout(() => setPage('recording'), 50); }
       });
     }
 
+    // Listen for in-app navigation events dispatched via window.dispatchEvent (e.g. from Detail.jsx)
+    const handleInAppNavigate = (e) => {
+      if (e.detail === 'settings') setPage('settings');
+      else if (e.detail === 'dashboard') setPage('dashboard');
+    };
+    window.addEventListener('meetingscribe-navigate', handleInAppNavigate);
+
     return () => {
-      clearInterval(engineInterval);
       if (unsubNavigate) unsubNavigate();
+      window.removeEventListener('meetingscribe-navigate', handleInAppNavigate);
     };
   }, []);
 
@@ -152,48 +141,17 @@ export default function App() {
             </nav>
           </div>
 
-          {/* Footer info in sidebar */}
-          <div className="p-5 border-t border-white/5 space-y-4">
-            {/* CPU + RAM stats */}
-            <SystemStats />
-
-            {/* Active Transcription Engine */}
-            <div className="space-y-1.5">
-              <span className="text-[9px] font-mono text-gray-600 uppercase tracking-widest">Engine Aktif</span>
-              {engineStatus ? (
-                <div className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border text-[10px] font-semibold ${
-                  engineStatus.engine === 'whisper.cpp'
-                    ? 'bg-emerald-500/8 border-emerald-500/20 text-emerald-400'
-                    : engineStatus.engine === 'onnx'
-                    ? 'bg-amber-500/8 border-amber-500/20 text-amber-400'
-                    : 'bg-purple-500/8 border-purple-500/20 text-purple-400'
-                }`}>
-                  {engineStatus.engine === 'whisper.cpp' ? (
-                    <Zap size={10} className="shrink-0" />
-                  ) : engineStatus.engine === 'onnx' ? (
-                    <Cpu size={10} className="shrink-0" />
-                  ) : (
-                    <Brain size={10} className="shrink-0" />
-                  )}
-                  <span className="truncate">
-                    {engineStatus.engine === 'whisper.cpp'
-                      ? 'whisper.cpp Metal GPU'
-                      : engineStatus.engine === 'onnx'
-                      ? 'ONNX Whisper (Lokal)'
-                      : 'Gemini AI Cloud'}
-                  </span>
-                </div>
-              ) : (
-                <div className="h-6 bg-white/5 rounded-lg animate-pulse" />
-              )}
-            </div>
-
-            <div className="border-t border-white/5 pt-3">
-              <div className="flex items-center gap-2 text-[10px] text-gray-500 font-mono">
-                <Sparkles size={11} className="text-indigo-400" />
-                Gemini AI Powered
-              </div>
-            </div>
+          {/* Footer — powered by technice.id */}
+          <div className="p-5 border-t border-white/5">
+            <a
+              href="https://technice.id"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2 text-[10px] text-gray-600 hover:text-gray-400 transition-colors font-mono group"
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-indigo-500/60 group-hover:bg-indigo-400 transition-colors" />
+              powered by technice.id
+            </a>
           </div>
         </aside>
 

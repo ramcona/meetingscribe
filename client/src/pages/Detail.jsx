@@ -293,6 +293,20 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
   const [summaryError, setSummaryError] = useState('');
 
   const handleGenerateSummary = async (type) => {
+    // Check if Gemini API key is configured before attempting generation
+    try {
+      const settingsRes = await fetch('http://localhost:3001/api/settings');
+      if (settingsRes.ok) {
+        const settings = await settingsRes.json();
+        if (!settings.gemini_api_key_set) {
+          setSummaryError('⚠️ Gemini API key belum dikonfigurasi. Buka Settings → masukkan Gemini API Key terlebih dahulu untuk menggunakan fitur AI Summary.');
+          return;
+        }
+      }
+    } catch (err) {
+      // If settings check fails, allow the summary request to proceed and let the backend return the error
+    }
+
     setGeneratingSummary(true);
     setSummaryError('');
     try {
@@ -1108,8 +1122,23 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
                 </div>
 
                 {summaryError && (
-                  <div className="w-full p-3 bg-red-500/10 border border-red-500/20 text-red-400 rounded-xl text-xs text-center leading-relaxed">
-                    {summaryError}
+                  <div className="w-full p-3 bg-amber-500/10 border border-amber-500/20 text-amber-300 rounded-xl text-xs leading-relaxed space-y-2">
+                    <p>{summaryError}</p>
+                    {summaryError.includes('API key') && (
+                      <button
+                        onClick={() => {
+                          // Try to navigate to Settings via electronAPI or dispatch custom event
+                          if (window.electronAPI && window.electronAPI.onNavigateTo) {
+                            window.__navigateToSettings && window.__navigateToSettings();
+                          }
+                          // Fallback: dispatch a custom event that App.jsx can listen for
+                          window.dispatchEvent(new CustomEvent('meetingscribe-navigate', { detail: 'settings' }));
+                        }}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 rounded-lg text-[10px] font-semibold text-amber-200 transition cursor-pointer"
+                      >
+                        → Buka Settings
+                      </button>
+                    )}
                   </div>
                 )}
 
