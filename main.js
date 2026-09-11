@@ -4,6 +4,9 @@ const fs = require('fs');
 const http = require('http');
 const { pathToFileURL } = require('url');
 
+// Explicitly set application name immediately at startup
+app.setName('MeetingScribe');
+
 // Load environment variables in Electron main process from server/.env if available
 const envPath = path.join(__dirname, 'server/.env');
 if (fs.existsSync(envPath)) {
@@ -27,11 +30,26 @@ const isDev = process.env.NODE_ENV === 'development' || process.env.ELECTRON_DEV
 // ─── Custom native App Menu (removes "Electron" branding) ────────────────────
 function buildAppMenu() {
   const isMac = process.platform === 'darwin';
+  const appName = 'MeetingScribe';
+  const iconPath = path.join(__dirname, 'icon.png');
+
   const template = [
     ...(isMac ? [{
-      label: app.getName(),
+      label: appName,
       submenu: [
-        { label: `About ${app.getName()}`, role: 'about' },
+        {
+          label: `About ${appName}`,
+          click: () => {
+            dialog.showMessageBox(mainWindow || null, {
+              type: 'info',
+              title: `About ${appName}`,
+              message: appName,
+              detail: `Versi 1.0.0 (Local-First)\nAI Meeting Recorder, Transcriber & Summarizer\n\n© 2025 MeetingScribe · powered by technice.id`,
+              icon: fs.existsSync(iconPath) ? iconPath : undefined,
+              buttons: ['Tutup']
+            });
+          }
+        },
         { type: 'separator' },
         {
           label: 'Preferences…',
@@ -43,9 +61,11 @@ function buildAppMenu() {
         { type: 'separator' },
         { role: 'services' },
         { type: 'separator' },
-        { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' },
+        { role: 'hide', label: `Hide ${appName}` },
+        { role: 'hideOthers' },
+        { role: 'unhide' },
         { type: 'separator' },
-        { role: 'quit' }
+        { role: 'quit', label: `Quit ${appName}` }
       ]
     }] : []),
     {
@@ -229,10 +249,6 @@ ipcMain.on('recording-state-changed', (_event, recording) => {
   isRecordingActive = !!recording;
   rebuildTrayMenu();
 });
-
-
-// Set application name for desktop OS integrations
-app.setName('MeetingScribe');
 
 function createWindow() {
   const iconPath = path.join(__dirname, 'icon.png');

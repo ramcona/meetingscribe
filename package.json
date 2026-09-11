@@ -1,5 +1,5 @@
 {
-  "name": "meetingscribe-workspace",
+  "name": "meetingscribe",
   "version": "1.0.0",
   "private": true,
   "main": "main.js",
@@ -43,6 +43,8 @@
       "category": "public.app-category.productivity",
       "icon": "icon.png",
       "extendInfo": {
+        "CFBundleName": "MeetingScribe",
+        "CFBundleDisplayName": "MeetingScribe",
         "NSMicrophoneUsageDescription": "MeetingScribe membutuhkan akses mikrofon untuk merekam audio meeting.",
         "NSScreenCaptureUsageDescription": "MeetingScribe membutuhkan akses audio sistem untuk merekam suara meeting online."
       },
