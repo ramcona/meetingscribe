@@ -109,7 +109,7 @@ export default function App() {
               <img src={logoImg} alt="Logo" className="h-10 w-10 rounded-2xl border border-white/10 shadow-md shadow-indigo-500/20 object-cover" />
               <div>
                 <div className="font-bold text-sm text-white tracking-wide">{appName}</div>
-                <div className="text-[10px] font-mono text-indigo-400 uppercase tracking-widest font-semibold">AI Meeting Assistant</div>
+                <div className="text-[10px] font-mono text-indigo-400 uppercase tracking-widest font-semibold">Meeting Recorder & Notes</div>
               </div>
             </div>
 

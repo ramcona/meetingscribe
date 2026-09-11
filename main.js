@@ -44,7 +44,7 @@ function buildAppMenu() {
               type: 'info',
               title: `About ${appName}`,
               message: appName,
-              detail: `Versi 1.0.0\nAI Meeting Recorder, Transcriber & Summarizer\n\n© 2025 MeetingScribe · powered by technice.id`,
+              detail: `Versi 1.0.0\nMeeting Recorder & Notes\n\n© 2025 MeetingScribe · powered by technice.id`,
               icon: fs.existsSync(iconPath) ? iconPath : undefined,
               buttons: ['Tutup']
             });
