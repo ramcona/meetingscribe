@@ -1,5 +1,5 @@
 import React from 'react';
-import { Play, Pause, Square, ExternalLink, Mic } from 'lucide-react';
+import { Play, Pause, Square, ExternalLink, Mic, MicOff } from 'lucide-react';
 import { useRecording } from '../context/RecordingContext';
 
 function formatTimer(sec) {
@@ -16,6 +16,8 @@ export default function FloatingRecordingBar({ onOpenRecordingPage, onFinishReco
     meetingTitle,
     duration,
     uploading,
+    isMicMuted,
+    toggleMuteMic,
     pauseRecording,
     resumeRecording,
     stopAndSaveRecording
@@ -55,6 +57,21 @@ export default function FloatingRecordingBar({ onOpenRecordingPage, onFinishReco
 
         {/* Controls */}
         <div className="flex items-center gap-2">
+          {/* Quick Mute / Unmute Mic */}
+          {!uploading && (
+            <button
+              onClick={toggleMuteMic}
+              title={isMicMuted ? 'Unmute Mikrofon' : 'Mute Mikrofon'}
+              className={`p-2.5 rounded-xl transition border cursor-pointer ${
+                isMicMuted
+                  ? 'bg-red-500/20 text-red-400 border-red-500/40 hover:bg-red-500/30'
+                  : 'bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white border-white/10'
+              }`}
+            >
+              {isMicMuted ? <MicOff size={14} className="text-red-400" /> : <Mic size={14} />}
+            </button>
+          )}
+
           {/* Pause / Resume */}
           {!uploading && (
             <button

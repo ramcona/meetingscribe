@@ -18,6 +18,10 @@ export function RecordingProvider({ children }) {
   const [systemId, setSystemId] = useState('');
   const [useTabCapture, setUseTabCapture] = useState(false);
 
+  // Mute states for microphone & system audio
+  const [isMicMuted, setIsMicMuted] = useState(false);
+  const [isSystemMuted, setIsSystemMuted] = useState(false);
+
   // Stream previews
   const [micStreamPreview, setMicStreamPreview] = useState(null);
   const [systemStreamPreview, setSystemStreamPreview] = useState(null);
@@ -312,10 +316,38 @@ export function RecordingProvider({ children }) {
     
     activeStreamsRef.current = { mic: null, system: null, mixed: null };
     recorderRef.current = null;
+    setIsMicMuted(false);
+    setIsSystemMuted(false);
+  };
+
+  const toggleMuteMic = () => {
+    setIsMicMuted(prev => {
+      const next = !prev;
+      if (activeStreamsRef.current?.mic) {
+        activeStreamsRef.current.mic.getAudioTracks().forEach(track => {
+          track.enabled = !next;
+        });
+      }
+      return next;
+    });
+  };
+
+  const toggleMuteSystem = () => {
+    setIsSystemMuted(prev => {
+      const next = !prev;
+      if (activeStreamsRef.current?.system) {
+        activeStreamsRef.current.system.getAudioTracks().forEach(track => {
+          track.enabled = !next;
+        });
+      }
+      return next;
+    });
   };
 
   const startRecording = async (targetMeetingId, title = '') => {
     setErrorMessage('');
+    setIsMicMuted(false);
+    setIsSystemMuted(false);
     stopPreviews();
 
     try {
@@ -481,6 +513,12 @@ export function RecordingProvider({ children }) {
       setMicStreamPreview,
       systemStreamPreview,
       setSystemStreamPreview,
+      isMicMuted,
+      setIsMicMuted,
+      isSystemMuted,
+      setIsSystemMuted,
+      toggleMuteMic,
+      toggleMuteSystem,
       startRecording,
       pauseRecording,
       resumeRecording,

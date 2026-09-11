@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
-  Play, Pause, Square, Mic, Video, Settings, ArrowLeft, RefreshCw, 
-  AlertTriangle, Sparkles, Radio, Globe, Copy, Trash2, Check, Volume2, MessageSquare
+  Play, Pause, Square, Mic, MicOff, Video, Settings, ArrowLeft, RefreshCw, 
+  AlertTriangle, Sparkles, Radio, Globe, Copy, Trash2, Check, Volume2, VolumeX, MessageSquare
 } from 'lucide-react';
 import { useRecording } from '../context/RecordingContext';
 import VUMeter from '../components/VUMeter';
@@ -31,6 +31,10 @@ export default function Recording({ meetingId, onBack, onRecordingUploaded }) {
     setMicStreamPreview,
     systemStreamPreview,
     setSystemStreamPreview,
+    isMicMuted,
+    isSystemMuted,
+    toggleMuteMic,
+    toggleMuteSystem,
     startRecording,
     pauseRecording,
     resumeRecording,
@@ -336,7 +340,18 @@ export default function Recording({ meetingId, onBack, onRecordingUploaded }) {
               {/* Microphone Selector */}
               <div className="space-y-2">
                 <label className="text-xs font-medium text-gray-300 flex items-center justify-between">
-                  <span>Microphone Suara Anda</span>
+                  <span className="flex items-center gap-2">
+                    <span>Microphone Suara Anda</span>
+                    {isCurrentMeetingRecording && (
+                      <span className={`px-2 py-0.5 rounded-full text-[9px] font-mono font-bold border transition ${
+                        isMicMuted
+                          ? 'bg-red-500/20 text-red-400 border-red-500/40 animate-pulse'
+                          : 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                      }`}>
+                        {isMicMuted ? '🔇 MUTED' : '🎙️ LIVE'}
+                      </span>
+                    )}
+                  </span>
                   <span className="text-[10px] text-gray-500">Audio Input</span>
                 </label>
                 <select
@@ -360,7 +375,18 @@ export default function Recording({ meetingId, onBack, onRecordingUploaded }) {
               {/* System Audio Selector */}
               <div className="space-y-2 pt-2">
                 <label className="text-xs font-medium text-gray-300 flex items-center justify-between">
-                  <span>Audio System / Lawan Bicara (Zoom/Meet/Teams)</span>
+                  <span className="flex items-center gap-2">
+                    <span>Audio System / Lawan Bicara (Zoom/Meet/Teams)</span>
+                    {isCurrentMeetingRecording && (systemId || useTabCapture) && (
+                      <span className={`px-2 py-0.5 rounded-full text-[9px] font-mono font-bold border transition ${
+                        isSystemMuted
+                          ? 'bg-red-500/20 text-red-400 border-red-500/40 animate-pulse'
+                          : 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                      }`}>
+                        {isSystemMuted ? '🔇 MUTED' : '🔊 LIVE'}
+                      </span>
+                    )}
+                  </span>
                   <span className="text-[10px] text-gray-500">System Loopback</span>
                 </label>
 
@@ -482,21 +508,56 @@ export default function Recording({ meetingId, onBack, onRecordingUploaded }) {
                   <Play size={28} className="text-white fill-white translate-x-0.5 group-hover:scale-110 transition" />
                 </button>
               ) : (
-                <div className="flex items-center gap-4">
+                <div className="flex flex-wrap items-center justify-center gap-4">
+                  {/* Mute/Unmute Mic Toggle */}
+                  <button
+                    onClick={toggleMuteMic}
+                    className={`h-14 w-14 rounded-full flex flex-col items-center justify-center transition border active:scale-95 cursor-pointer shadow-lg ${
+                      isMicMuted
+                        ? 'bg-red-500/20 text-red-400 border-red-500/50 hover:bg-red-500/30 shadow-red-500/20'
+                        : 'bg-white/10 hover:bg-white/20 text-white border-white/10'
+                    }`}
+                    title={isMicMuted ? 'Unmute Microphone' : 'Mute Microphone'}
+                  >
+                    {isMicMuted ? <MicOff size={20} className="text-red-400" /> : <Mic size={20} className="text-gray-200" />}
+                    <span className="text-[8px] font-mono font-bold mt-0.5">{isMicMuted ? 'UNMUTE' : 'MUTE'}</span>
+                  </button>
+
+                  {/* Pause / Resume */}
                   <button
                     onClick={isPaused ? resumeRecording : pauseRecording}
-                    className="h-14 w-14 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition border border-white/10 active:scale-95 cursor-pointer"
-                    title={isPaused ? 'Resume' : 'Pause'}
+                    className="h-14 w-14 rounded-full bg-white/10 hover:bg-white/20 text-white flex flex-col items-center justify-center transition border border-white/10 active:scale-95 cursor-pointer shadow-lg"
+                    title={isPaused ? 'Resume Recording' : 'Pause Recording'}
                   >
                     {isPaused ? <Play size={20} className="fill-current text-emerald-400" /> : <Pause size={20} className="text-amber-400" />}
+                    <span className="text-[8px] font-mono font-bold mt-0.5 text-gray-400">{isPaused ? 'RESUME' : 'PAUSE'}</span>
                   </button>
+
+                  {/* Stop & Save */}
                   <button
                     onClick={() => stopAndSaveRecording(onRecordingUploaded)}
-                    className="h-20 w-20 rounded-full bg-white hover:bg-gray-200 flex items-center justify-center transition shadow-xl border border-white/20 active:scale-95 group cursor-pointer"
+                    className="h-20 w-20 rounded-full bg-white hover:bg-gray-200 flex flex-col items-center justify-center transition shadow-2xl border border-white/20 active:scale-95 group cursor-pointer"
                     title="Stop & Save Recording"
                   >
-                    <Square size={26} className="text-[#0A0A0B] fill-[#0A0A0B] group-hover:scale-90 transition" />
+                    <Square size={24} className="text-[#0A0A0B] fill-[#0A0A0B] group-hover:scale-90 transition" />
+                    <span className="text-[9px] font-mono font-bold text-[#0A0A0B] mt-0.5">SELESAI</span>
                   </button>
+
+                  {/* Mute System Audio (if system device is active) */}
+                  {(systemId || useTabCapture) && (
+                    <button
+                      onClick={toggleMuteSystem}
+                      className={`h-14 w-14 rounded-full flex flex-col items-center justify-center transition border active:scale-95 cursor-pointer shadow-lg ${
+                        isSystemMuted
+                          ? 'bg-red-500/20 text-red-400 border-red-500/50 hover:bg-red-500/30 shadow-red-500/20'
+                          : 'bg-white/10 hover:bg-white/20 text-white border-white/10'
+                      }`}
+                      title={isSystemMuted ? 'Unmute System Audio' : 'Mute System Audio'}
+                    >
+                      {isSystemMuted ? <VolumeX size={20} className="text-red-400" /> : <Volume2 size={20} className="text-gray-200" />}
+                      <span className="text-[8px] font-mono font-bold mt-0.5">{isSystemMuted ? 'SYS ON' : 'SYS MUTE'}</span>
+                    </button>
+                  )}
                 </div>
               )}
             </div>

@@ -728,11 +728,11 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
                   <span>Transcribing ({meeting.progress || 10}%)</span>
                 </div>
               ) : (
-                <div className="flex items-center gap-2 self-start lg:self-auto">
+                <div className="flex flex-wrap items-center gap-2 self-start lg:self-auto">
                   {meeting.segments && meeting.segments.length > 0 && (
                     <button
                       onClick={() => handleExport('transcript')}
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 rounded-xl text-gray-200 hover:text-white transition cursor-pointer shadow-sm"
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 rounded-xl text-gray-200 hover:text-white transition cursor-pointer shadow-sm shrink-0"
                       title="Download transcript as Markdown file"
                     >
                       <Download size={13} className="text-gray-400" />
@@ -743,11 +743,11 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
                   {meeting.audio_path && (
                     <button
                       onClick={() => setShowEngineModal(true)}
-                      className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-indigo-600/15 hover:bg-indigo-600/25 border border-indigo-500/30 hover:border-indigo-500/50 text-indigo-300 hover:text-white text-xs font-semibold transition cursor-pointer shrink-0 shadow-sm shadow-indigo-600/10"
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600/15 hover:bg-indigo-600/25 border border-indigo-500/30 hover:border-indigo-500/50 text-indigo-300 hover:text-white text-xs font-semibold transition cursor-pointer shrink-0 shadow-sm shadow-indigo-600/10"
                       title="Transkrip Ulang / Ganti Engine Transkripsi"
                     >
                       <RefreshCw size={12} className="text-indigo-400" />
-                      <span>Re-Transkrip / Ganti Engine</span>
+                      <span>Re-Transkrip</span>
                     </button>
                   )}
                 </div>
