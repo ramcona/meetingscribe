@@ -667,59 +667,86 @@ export default function Detail({ meetingId, onBack, onStartRecording }) {
 
           {/* Transcript Card */}
           <div className="bg-[#111113] border border-white/5 rounded-3xl overflow-hidden min-h-[500px] flex flex-col">
-            <div className="border-b border-white/5 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[#151517]">
-              <div className="flex items-center gap-3">
-                <div className="flex items-center gap-2">
-                  <FileText size={16} className="text-gray-400" />
-                  <h2 className="text-sm font-semibold text-white">Transcript</h2>
+            {/* Redesigned Transcript Header Bar */}
+            <div className="border-b border-white/5 px-5 py-3.5 bg-[#141417] flex flex-col lg:flex-row lg:items-center justify-between gap-3.5">
+              {/* Left: Title & Segmented Sub-Tabs */}
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="flex items-center gap-2 pr-1 select-none">
+                  <div className="p-1.5 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-400">
+                    <FileText size={15} />
+                  </div>
+                  <h2 className="text-sm font-bold text-white tracking-wide">Transcript</h2>
                 </div>
 
-                {/* Sub-Tab Switcher: AI Transcript vs Live Draft Transcript */}
-                <div className="flex items-center bg-black/40 border border-white/10 p-0.5 rounded-xl text-xs">
+                {/* Segmented Tab Pill */}
+                <div className="flex items-center bg-black/40 border border-white/10 p-1 rounded-xl gap-1">
                   <button
                     onClick={() => setTranscriptSubTab('ai')}
-                    className={`px-3 py-1 font-medium rounded-lg transition cursor-pointer ${
-                      transcriptSubTab === 'ai' ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-white'
+                    className={`flex items-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                      transcriptSubTab === 'ai'
+                        ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
+                        : 'text-gray-400 hover:text-white hover:bg-white/5'
                     }`}
                   >
-                    Transkrip Utama ({meeting.segments?.length || 0})
+                    <span>Transkrip Utama</span>
+                    <span className={`px-1.5 py-0.5 rounded-md text-[10px] font-mono leading-none ${
+                      transcriptSubTab === 'ai'
+                        ? 'bg-white/20 text-white font-bold'
+                        : 'bg-white/5 text-gray-400'
+                    }`}>
+                      {meeting.segments?.length || 0}
+                    </span>
                   </button>
+
                   <button
                     onClick={() => setTranscriptSubTab('live')}
-                    className={`px-3 py-1 font-medium rounded-lg transition cursor-pointer flex items-center gap-1.5 ${
-                      transcriptSubTab === 'live' ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-white'
+                    className={`flex items-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                      transcriptSubTab === 'live'
+                        ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
+                        : 'text-gray-400 hover:text-white hover:bg-white/5'
                     }`}
                   >
-                    <span>Draft Live ({meeting.live_segments?.length || 0})</span>
-                    <span className="px-1.5 py-0.2 bg-indigo-500/30 text-indigo-200 text-[9px] rounded-full font-mono">BETA</span>
+                    <span>Draft Live</span>
+                    <span className={`px-1.5 py-0.5 rounded-md text-[10px] font-mono leading-none ${
+                      transcriptSubTab === 'live'
+                        ? 'bg-white/20 text-white font-bold'
+                        : 'bg-white/5 text-gray-400'
+                    }`}>
+                      {meeting.live_segments?.length || 0}
+                    </span>
+                    <span className="px-1.5 py-0.5 bg-amber-500/20 border border-amber-500/30 text-amber-300 text-[9px] font-bold rounded-md font-mono tracking-wider">
+                      BETA
+                    </span>
                   </button>
                 </div>
               </div>
-              
+
+              {/* Right: Actions (Transcribing indicator / Export / Re-Transcribe) */}
               {meeting.status === 'transcribing' ? (
-                <div className="flex items-center gap-1.5 text-xs text-yellow-400 font-mono">
-                  <RefreshCw size={12} className="animate-spin" />
-                  Transcribing ({meeting.progress || 10}%)
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-yellow-500/10 border border-yellow-500/20 text-xs text-yellow-400 font-mono self-start lg:self-auto">
+                  <RefreshCw size={12} className="animate-spin text-yellow-400" />
+                  <span>Transcribing ({meeting.progress || 10}%)</span>
                 </div>
               ) : (
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 self-start lg:self-auto">
                   {meeting.segments && meeting.segments.length > 0 && (
                     <button
                       onClick={() => handleExport('transcript')}
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-white/70 hover:text-white transition-colors"
-                      title="Download transcript as Markdown"
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 rounded-xl text-gray-200 hover:text-white transition cursor-pointer shadow-sm"
+                      title="Download transcript as Markdown file"
                     >
-                      <Download className="w-3.5 h-3.5" />
-                      Export
+                      <Download size={13} className="text-gray-400" />
+                      <span>Export</span>
                     </button>
                   )}
+
                   {meeting.audio_path && (
                     <button
                       onClick={() => setShowEngineModal(true)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600/15 hover:bg-indigo-600/25 border border-indigo-500/25 text-indigo-300 hover:text-white text-xs font-semibold transition cursor-pointer shrink-0"
+                      className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-indigo-600/15 hover:bg-indigo-600/25 border border-indigo-500/30 hover:border-indigo-500/50 text-indigo-300 hover:text-white text-xs font-semibold transition cursor-pointer shrink-0 shadow-sm shadow-indigo-600/10"
                       title="Transkrip Ulang / Ganti Engine Transkripsi"
                     >
-                      <RefreshCw size={12} />
+                      <RefreshCw size={12} className="text-indigo-400" />
                       <span>Re-Transkrip / Ganti Engine</span>
                     </button>
                   )}
